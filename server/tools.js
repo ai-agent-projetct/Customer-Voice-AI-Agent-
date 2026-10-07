@@ -4,6 +4,7 @@
 import crypto from "node:crypto";
 import { DEFAULT_HOURS, normalizeServices } from "./catalog.js";
 import { findCustomer, upsertCustomer } from "./customers.js";
+import { agentLanguages, lang } from "./languages.js";
 import { notifyOwner, queueMessage } from "./messaging.js";
 import { localParts, samePhone, toHHMM, toMinutes, todayIn } from "./util.js";
 
@@ -93,6 +94,14 @@ export function toolDefinitions(agent, org, call) {
         { phone: str(), message: str("Short, complete message text") },
       ),
     );
+  }
+  const languages = agentLanguages(agent);
+  if (languages.length > 1) {
+    tools.push({
+      ...tool("switch_language", "Switch the call to another language you speak, when the caller asks for it or clearly starts speaking it. Then continue in that language.", {
+        language: { type: "string", enum: languages, description: languages.map((c) => `${c} = ${lang(c).name}`).join(", ") },
+      }),
+    });
   }
   if (call?.callerNumber) {
     tools.push(tool("do_not_call", "The caller asked never to be called again. Respect it immediately.", { reason: str() }));
@@ -239,6 +248,11 @@ export function runTool(db, agent, call, name, input) {
       upsertCustomer(db, agent.orgId, call.callerNumber, { doNotCall: true, doNotCallReason: input.reason, doNotCallAt: new Date().toISOString() });
       return { result: "Done: this number will not be called again. Apologise briefly and end the call politely." };
     }
+    case "switch_language": {
+      if (!agentLanguages(agent).includes(input.language)) return { result: "That language isn't available. Continue in the current language." };
+      switchLanguage(db, agent, call, input.language, "tool");
+      return { result: `Switched. The caller now hears the ${lang(input.language).name} voice: reply only in ${lang(input.language).name}.` };
+    }
     case "transfer_to_human":
       return { result: "Transferring now. Tell the caller you are connecting them.", action: { type: "transfer", reason: input.reason } };
     case "end_call":
@@ -253,4 +267,18 @@ function rememberCaller(db, agent, call, phone, name) {
   if (!call.callerNumber || !samePhone(phone, call.callerNumber)) return;
   const existing = findCustomer(db, agent.orgId, call.callerNumber);
   if (existing && !existing.name && name) db.update("customers", existing.id, { name });
+}
+
+
+/**
+ * Change the language of a live call: speech recognition and the voice follow
+ * call.language, and callers with a phone number get it remembered for next time.
+ */
+export function switchLanguage(db, agent, call, code, reason = "tool") {
+  if (!agentLanguages(agent).includes(code) || call.language === code) return false;
+  call.language = code;
+  call.languageLog = [...(call.languageLog || []), { code, reason, turn: call.transcript?.length ?? 0, at: new Date().toISOString() }];
+  if (call.id && db.get("calls", call.id)) db.update("calls", call.id, { language: code, languageLog: call.languageLog });
+  if (call.callerNumber) upsertCustomer(db, agent.orgId, call.callerNumber, { preferredLanguage: code });
+  return true;
 }

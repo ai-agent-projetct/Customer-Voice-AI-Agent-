@@ -2,6 +2,7 @@
 import express from "express";
 import { MAX_CONTACTS, campaignStats, parseContacts } from "../campaigns.js";
 import { lapsedCustomers } from "../customers.js";
+import { agentLanguages } from "../languages.js";
 import { dailyBrief, insights } from "../insights.js";
 import { planOf } from "../plans.js";
 import { owned } from "./helpers.js";
@@ -56,6 +57,7 @@ export function growthRouter(db, auth) {
       name: String(b.name).trim().slice(0, 100),
       goal: String(b.goal).trim().slice(0, 1500),
       openingLine: String(b.openingLine).trim().slice(0, 300),
+      language: agentLanguages(agent).includes(b.language) ? b.language : agent.language,
       window,
       maxConcurrent: Math.min(5, Math.max(1, Number(b.maxConcurrent) || 2)),
       consentConfirmed: true,

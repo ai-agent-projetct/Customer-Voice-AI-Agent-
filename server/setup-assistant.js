@@ -2,6 +2,7 @@
 // notes (any language) into a ready receptionist: knowledge, services with
 // prices, FAQs and a greeting. Returns a proposal; the owner reviews and saves.
 import { languageInfo } from "./catalog.js";
+import { agentLanguages, lang } from "./languages.js";
 import { aiEnabled, objectSchema, structured } from "./llm.js";
 
 const SCHEMA = objectSchema({
@@ -84,4 +85,30 @@ function demoAutofill(agent, org, notes) {
     faqs: [],
     demo: true,
   };
+}
+
+/**
+ * Natural phone greetings in each of the receptionist's other languages,
+ * written from the main greeting. Returns { greetings: { code: text } }.
+ * Demo mode uses the built-in greeting for each language.
+ */
+export async function translateGreetings(agent, orgName, greeting) {
+  const targets = agentLanguages(agent).filter((c) => c !== agent.language);
+  if (!targets.length) throw new Error("Add another language first.");
+  if (!aiEnabled()) {
+    return { greetings: Object.fromEntries(targets.map((c) => [c, lang(c).greeting.replace("{org}", orgName)])), demo: true };
+  }
+  const schema = objectSchema({
+    greetings: {
+      type: "array",
+      items: objectSchema({ code: { type: "string", enum: targets }, text: { type: "string" } }),
+    },
+  });
+  const out = await structured({
+    system: "You localise phone greetings for small Indian businesses. Write how a friendly receptionist would really speak in each language: natural, polite, short, in the language's own script. Keep the business name as is.",
+    prompt: `Business: ${orgName}\nGreeting (${lang(agent.language).name}): ${greeting}\n\nWrite this greeting for: ${targets.map((c) => `${c} (${lang(c).name})`).join(", ")}.`,
+    schema,
+    effort: "low",
+  });
+  return { greetings: Object.fromEntries(out.greetings.filter((g) => targets.includes(g.code) && g.text).map((g) => [g.code, g.text])) };
 }

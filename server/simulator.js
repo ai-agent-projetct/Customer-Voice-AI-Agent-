@@ -37,6 +37,12 @@ export const PERSONAS = [
     demo: ["This is urgent, I need help right now", "Please hurry", "Okay bye"],
   },
   {
+    id: "language",
+    label: "Language switch",
+    brief: "Start in English, then ask to continue in Hindi (or another Indian language the business offers) and finish your enquiry in that language, in its own script. See if the receptionist switches smoothly.",
+    demo: ["Hello, can you speak Hindi?", "मुझे कल शाम का अपॉइंटमेंट चाहिए।", "धन्यवाद, bye"],
+  },
+  {
     id: "reschedule",
     label: "Reschedule a booking",
     brief: "You are elderly and a little confused. You want to move your booking (you think it's on Friday) to another day. You may need things repeated.",

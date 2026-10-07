@@ -5,6 +5,7 @@ import { LANGUAGES, TEMPLATES } from "../catalog.js";
 import { aiEnabled } from "../llm.js";
 import { PLANS, usage } from "../plans.js";
 import { PERSONAS } from "../simulator.js";
+import { premiumConfigured, premiumLanguages } from "../tts.js";
 import { normalizePhone } from "../util.js";
 import { isAdmin, rateLimiter } from "./helpers.js";
 
@@ -22,6 +23,7 @@ export function accountRouter(db, auth) {
       personas: PERSONAS.map(({ id, label, brief }) => ({ id, label, brief })),
       plans: Object.entries(PLANS).map(([id, p]) => ({ id, ...p, minutes: Number.isFinite(p.minutes) ? p.minutes : null, agents: Number.isFinite(p.agents) ? p.agents : null })),
       aiEnabled: aiEnabled(),
+      premiumVoice: { available: premiumConfigured(), languages: premiumLanguages() },
     });
   });
 

@@ -111,6 +111,29 @@ confirmed, calls are only placed inside the window (never before 9am or after 9p
 the do-not-call list is skipped, and every call opens with "this is an AI assistant calling
 from [business]". Set `TWILIO_CALLER_ID` and `PUBLIC_URL` to enable dialling.
 
+**Languages (`languages.js`, `tts.js`).** A receptionist has a main language and can
+speak up to 9 more. Each call has a *current language*, and both the speech recognition
+(`<Gather language=…>`) and the voice (`<Say voice=…>`) follow it. The language can change
+in four ways:
+1. **Language menu:** "For English press 1, हिंदी के लिए 2 दबाइए, தமிழுக்கு 3 ஐ அழுத்தவும்". Each
+   option is spoken in its own voice, and callers can press a key or say the language's name.
+2. **Asking:** "Tamil la pesunga". Claude calls the `switch_language` tool.
+3. **Speaking or typing it:** if the words arrive in another script (Devanagari, Tamil…),
+   the call follows automatically.
+4. **Memory:** the customer's last language is saved, so returning callers skip the menu.
+
+When the language changes, Claude gets a short note ("The call is now in Tamil") instead
+of a rewritten system prompt, so the cached prompt keeps working. The built-in phrases
+(greetings, "sorry, I didn't catch that", menu lines) are in `languages.js`. **Have a native
+speaker of each language you sell in review them before launch.**
+
+Voices: Google voices through Twilio by default, female or male, with a slower option
+for elderly callers. For more natural speech, set `ELEVENLABS_API_KEY` (see `.env.example`)
+and choose "Premium natural voice" on the receptionist. The server generates the audio,
+Twilio plays it, and anything that fails falls back to the standard voice. Indian-language
+coverage differs between voice providers and models: check before promising a language,
+and consider Indian-language specialists such as Sarvam AI.
+
 **Plans (`plans.js`).** Minutes are counted from real phone and widget conversations each
 month. When a business runs out, callers are never dropped: they are transferred to the
 owner, and the owner gets an alert to upgrade. People listed in `ADMIN_EMAILS` see the
@@ -245,7 +268,8 @@ Already built: website widget, caller memory, teaching loop, Test Lab, analysis 
 scores, ROI dashboard, WhatsApp follow-ups, reminders, daily brief, live takeover, campaigns,
 plans and admin. Next:
 
-- Streaming voice (section 7) and higher-quality Indian-language voices
+- Streaming voice (section 7), and Indian-language voice models (for example Sarvam AI) as another premium voice option
+- More languages (Odia, Punjabi, Urdu, Assamese) once their voices are checked with native speakers
 - An Exotel or Plivo adapter for local Indian numbers
 - WhatsApp as a full two-way channel using the same brain
 - Calendar sync (Google Calendar, clinic and salon software)

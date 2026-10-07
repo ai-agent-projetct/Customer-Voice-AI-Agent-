@@ -1,10 +1,11 @@
 // Receptionists: create, edit, browser test calls, AI setup assistant, Test Lab.
 import crypto from "node:crypto";
 import express from "express";
-import { DEFAULT_HOURS, LANGUAGES, TEMPLATES, normalizeServices } from "../catalog.js";
+import { DEFAULT_HOURS, TEMPLATES, normalizeServices } from "../catalog.js";
+import { RATES, isLanguage } from "../languages.js";
 import { startCall } from "../calls.js";
 import { planOf } from "../plans.js";
-import { autofill } from "../setup-assistant.js";
+import { autofill, translateGreetings } from "../setup-assistant.js";
 import { PERSONAS, startSimulation } from "../simulator.js";
 import { normalizePhone } from "../util.js";
 import { owned, rateLimiter, wrap } from "./helpers.js";
@@ -12,6 +13,7 @@ import { owned, rateLimiter, wrap } from "./helpers.js";
 const AGENT_FIELDS = [
   "name", "language", "voice", "greeting", "businessInfo", "instructions", "services", "faqs",
   "bookingEnabled", "transferNumber", "phoneNumber", "hours", "timeZone", "active", "widgetEnabled",
+  "languages", "languageMenu", "voiceGender", "speakingRate", "greetings", "voices", "voiceEngine",
 ];
 
 export function agentsRouter(db, auth) {
@@ -30,7 +32,14 @@ export function agentsRouter(db, auth) {
     const agent = db.insert("agents", {
       orgId: req.org.id,
       language: "en-IN",
-      voice: LANGUAGES[0].voice,
+      voice: "", // empty = the language's default voice for voiceGender
+      languages: [], // extra languages besides the main one
+      languageMenu: true,
+      voiceGender: "female",
+      speakingRate: "normal",
+      voiceEngine: "standard",
+      greetings: {},
+      voices: {},
       transferNumber: "",
       phoneNumber: "",
       hours: structuredClone(DEFAULT_HOURS),
@@ -73,8 +82,8 @@ export function agentsRouter(db, auth) {
   r.post("/:id/test", (req, res) => {
     const agent = owned(db, "agents", req, res, "Receptionist not found.");
     if (!agent) return;
-    const call = startCall(db, agent, { channel: "web" });
-    res.status(201).json({ callId: call.id, greeting: call.greeting });
+    const call = startCall(db, agent, { channel: "web", language: req.body?.language });
+    res.status(201).json({ callId: call.id, greeting: call.greeting, language: call.language });
   });
 
   // AI setup assistant: returns a proposal, nothing is saved until the owner saves.
@@ -84,6 +93,18 @@ export function agentsRouter(db, auth) {
     if (!aiLimit(`autofill:${req.org.id}`)) return res.status(429).json({ error: "Too many requests. Try again in an hour." });
     try {
       res.json(await autofill({ agent, org: req.org, notes: String(req.body?.notes || ""), url: req.body?.url }));
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  }));
+
+  // Translate the main greeting into every other language the receptionist speaks.
+  r.post("/:id/translate-greetings", wrap(async (req, res) => {
+    const agent = owned(db, "agents", req, res, "Receptionist not found.");
+    if (!agent) return;
+    if (!aiLimit(`translate:${req.org.id}`)) return res.status(429).json({ error: "Too many requests. Try again in an hour." });
+    try {
+      res.json(await translateGreetings(agent, req.org.name, String(req.body?.greeting || agent.greeting)));
     } catch (err) {
       res.status(400).json({ error: err.message });
     }
@@ -117,7 +138,25 @@ function validateAgent(c) {
   }
   if ("name" in c && !c.name.trim()) return "Name is required.";
   if ("businessInfo" in c && c.businessInfo.length > 30000) return "Business information is too long (30,000 characters max).";
-  if ("language" in c && !LANGUAGES.some((l) => l.code === c.language)) return "Unknown language.";
+  if ("language" in c && !isLanguage(c.language)) return "Unknown language.";
+  if ("languages" in c) {
+    if (!Array.isArray(c.languages) || c.languages.length > 12 || !c.languages.every(isLanguage)) return "Choose languages from the list.";
+    c.languages = [...new Set(c.languages)];
+  }
+  if ("voiceGender" in c && !["female", "male"].includes(c.voiceGender)) return "Voice must be female or male.";
+  if ("speakingRate" in c && !Object.keys(RATES).includes(c.speakingRate)) return "Speaking speed must be slow, normal or fast.";
+  if ("voiceEngine" in c && !["standard", "premium"].includes(c.voiceEngine)) return "Voice engine must be standard or premium.";
+  for (const key of ["greetings", "voices"]) {
+    if (!(key in c)) continue;
+    const map = c[key];
+    if (!map || typeof map !== "object" || Array.isArray(map)) return `${key} must be an object.`;
+    for (const [code, value] of Object.entries(map)) {
+      if (!isLanguage(code) || typeof value !== "string") return `${key} has an unknown language.`;
+      if (key === "voices" && value && !/^[\w.-]{3,80}$/.test(value)) return "Voice names look like Google.hi-IN-Neural2-A.";
+      if (value.length > 600) return "Greetings must be under 600 characters.";
+    }
+    c[key] = Object.fromEntries(Object.entries(map).filter(([, v]) => v.trim()).map(([k, v]) => [k, v.trim()]));
+  }
   for (const key of ["bookingEnabled", "active", "widgetEnabled"]) if (key in c && typeof c[key] !== "boolean") return `${key} must be true or false.`;
   for (const key of ["phoneNumber", "transferNumber"]) if (c[key]) c[key] = normalizePhone(c[key]);
   if ("services" in c) {

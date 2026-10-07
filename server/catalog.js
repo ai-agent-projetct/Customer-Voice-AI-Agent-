@@ -1,20 +1,12 @@
 // Ready-made options shown in the dashboard: languages, phone voices and
 // starter templates for common local businesses.
 
-// `twilio` is the speech-recognition language code for <Gather>, `voice` is a
-// Twilio <Say> voice (Google neural voices). Swap voices freely in the editor.
-export const LANGUAGES = [
-  { code: "en-IN", name: "English (India)", voice: "Google.en-IN-Neural2-A" },
-  { code: "hi-IN", name: "Hindi", voice: "Google.hi-IN-Neural2-A" },
-  { code: "ta-IN", name: "Tamil", voice: "Google.ta-IN-Standard-A" },
-  { code: "te-IN", name: "Telugu", voice: "Google.te-IN-Standard-A" },
-  { code: "kn-IN", name: "Kannada", voice: "Google.kn-IN-Standard-A" },
-  { code: "ml-IN", name: "Malayalam", voice: "Google.ml-IN-Standard-A" },
-  { code: "mr-IN", name: "Marathi", voice: "Google.mr-IN-Standard-A" },
-  { code: "bn-IN", name: "Bengali", voice: "Google.bn-IN-Standard-A" },
-  { code: "gu-IN", name: "Gujarati", voice: "Google.gu-IN-Standard-A" },
-  { code: "en-US", name: "English (US)", voice: "Google.en-US-Neural2-F" },
-];
+// Languages live in languages.js; this is the summary the dashboard shows.
+import { LANGUAGE_DATA, lang } from "./languages.js";
+
+export const LANGUAGES = LANGUAGE_DATA.map(({ code, name, native, voices, script, greeting }) => ({
+  code, name, native, script, voice: voices.female, voices, greeting,
+}));
 
 export const DEFAULT_HOURS = {
   days: [1, 2, 3, 4, 5, 6], // Monday to Saturday (0 = Sunday)
@@ -99,5 +91,6 @@ export function normalizeServices(services) {
 }
 
 export function languageInfo(code) {
-  return LANGUAGES.find((l) => l.code === code) ?? LANGUAGES[0];
+  const l = lang(code);
+  return { code: l.code, name: l.name, native: l.native, voice: l.voices.female };
 }

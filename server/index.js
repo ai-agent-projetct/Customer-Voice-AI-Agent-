@@ -7,6 +7,7 @@ import { aiEnabled } from "./llm.js";
 import { startScheduler } from "./scheduler.js";
 import { apiRouter } from "./routes/api.js";
 import { twilioRouter } from "./routes/twilio.js";
+import { cachedAudio } from "./tts.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -27,6 +28,12 @@ export function createApp(db) {
   app.use("/api", express.json({ limit: "200kb" }), apiRouter(db));
   app.use("/twilio", twilioRouter(db));
   app.get("/healthz", (req, res) => res.json({ ok: true }));
+  // Premium-voice audio that Twilio fetches with <Play> (see tts.js).
+  app.get("/audio/:id.mp3", (req, res) => {
+    const clip = /^[a-f0-9]{32}$/.test(req.params.id) && cachedAudio(req.params.id);
+    if (!clip) return res.sendStatus(404);
+    res.type(clip.type).set("Cache-Control", "public, max-age=3600").send(clip.audio);
+  });
   app.use(express.static(path.join(here, "..", "public"), { extensions: ["html"] }));
   app.use((err, req, res, next) => {
     console.error(err);

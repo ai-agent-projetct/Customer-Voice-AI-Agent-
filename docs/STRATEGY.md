@@ -71,6 +71,12 @@ Returning callers are recognised by number: *"Welcome back, Ravi! Same haircut a
 It knows their past bookings and notes. Local businesses run on relationships; most bots treat
 every call as a stranger.
 
+### D2. "Speaks your customer's language, and switches when they do"
+One number, 10 languages. Callers pick from a menu where each option is spoken in its own
+language, or just start talking: the receptionist follows them mid-call, from English to
+Tamil to Hindi, and remembers each customer's language for next time. Most platforms set one
+language per agent, so this matters in multilingual cities and border regions.
+
 ### E. "Customers can manage their own bookings by phone"
 Book, check, cancel or reschedule by voice, with the rules (hours, slot length, no
 double-booking) enforced in code.

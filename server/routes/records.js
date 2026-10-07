@@ -54,9 +54,9 @@ export function recordsRouter(db, auth) {
     if (!text) return res.status(400).json({ error: "Say something first." });
     const agent = db.get("agents", call.agentId);
     if (!agent) return res.status(404).json({ error: "Receptionist not found." });
-    const { reply, action } = await respond(db, agent, call, text);
+    const { reply, action, language } = await respond(db, agent, call, text);
     if (action) endCall(db, call, action.type === "transfer" ? "transferred" : "completed");
-    res.json({ reply, action });
+    res.json({ reply, action, language });
   }));
 
   r.post("/calls/:id/end", (req, res) => {

@@ -1,30 +1,38 @@
 // Browser test call: talk to a receptionist with the Web Speech API
 // (speech recognition + speech synthesis), or type.
-import { api, h, onLeave } from "./core.js";
+import { api, h, onLeave, state } from "./core.js";
+
+const nativeName = (code) => state.catalog.languages.find((l) => l.code === code)?.native ?? code;
+function showLanguage() {
+  const el = document.getElementById("lang-now");
+  if (el && test) el.textContent = `Speaking: ${nativeName(test.lang)}`;
+}
 
 const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 let test = null;
 
 /** beforeStart (optional) runs first, e.g. saving the form; return false to cancel. */
-export function mountTestCall(agent, beforeStart) {
+export function mountTestCall(agent, beforeStart, pickLanguage = () => agent.language) {
   document.getElementById("start").onclick = async () => {
     if (beforeStart && !(await beforeStart())) return;
-    startTestCall(agent);
+    startTestCall(agent, pickLanguage());
   };
   onLeave(stopTestCall);
 }
 
-async function startTestCall(agent) {
+async function startTestCall(agent, chosenLanguage) {
   const chat = document.getElementById("chat");
   const controls = document.getElementById("controls");
   chat.innerHTML = "";
-  const { callId, greeting } = await api("POST", `/agents/${agent.id}/test`);
-  test = { callId, lang: agent.language, busy: false, ended: false, recognizer: null };
+  const { callId, greeting, language } = await api("POST", `/agents/${agent.id}/test`, { language: chosenLanguage });
+  test = { callId, lang: language, busy: false, ended: false, recognizer: null };
 
   controls.innerHTML = `
     ${Recognition ? `<button class="mic" id="mic" title="Speak" aria-label="Speak"><svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>` : ""}
     <form id="say" style="display:flex;gap:8px;flex:1"><input name="text" placeholder="Type what a caller would say…" autocomplete="off" aria-label="Message"><button class="btn btn-primary">Send</button></form>
-    <button class="btn" id="hangup" title="End call">End</button>`;
+    <button class="btn" id="hangup" title="End call">End</button>
+    <div class="lang-now" id="lang-now"></div>`;
+  showLanguage();
 
   addMsg("agent", greeting);
   speak(greeting, () => listen());
@@ -53,8 +61,13 @@ async function send(text) {
   addMsg("caller", text);
   addMsg("system", "…");
   try {
-    const { reply, action } = await api("POST", `/calls/${test.callId}/say`, { text });
+    const { reply, action, language } = await api("POST", `/calls/${test.callId}/say`, { text });
     document.querySelector("#chat .msg.system:last-child")?.remove();
+    if (language && language !== test.lang) {
+      test.lang = language; // the receptionist switched language: listen and speak in it now
+      addMsg("system", `Switched to ${nativeName(language)}`);
+      showLanguage();
+    }
     addMsg("agent", reply);
     test.busy = false;
     if (action) {

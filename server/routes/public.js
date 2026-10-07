@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 import express from "express";
 import { respond } from "../agent.js";
 import { endCall, startCall } from "../calls.js";
-import { languageInfo } from "../catalog.js";
+import { agentLanguages, lang, phrase } from "../languages.js";
 import { canTakeCalls } from "../plans.js";
 import { rateLimiter, wrap } from "./helpers.js";
 
@@ -29,7 +29,12 @@ export function publicRouter(db) {
   r.get("/agents/:publicId", (req, res) => {
     const agent = findAgent(req.params.publicId);
     if (!agent) return res.status(404).json({ error: "This assistant is not available." });
-    res.json({ name: agent.name, business: db.get("orgs", agent.orgId)?.name, language: languageInfo(agent.language).code });
+    res.json({
+      name: agent.name,
+      business: db.get("orgs", agent.orgId)?.name,
+      language: agent.language,
+      languages: agentLanguages(agent).map((code) => ({ code, native: lang(code).native })),
+    });
   });
 
   r.post("/agents/:publicId/sessions", (req, res) => {
@@ -39,10 +44,11 @@ export function publicRouter(db) {
     const org = db.get("orgs", agent.orgId);
     if (!org || !canTakeCalls(db, org)) return res.status(503).json({ error: "The assistant is busy right now. Please call the business directly." });
     const secret = crypto.randomBytes(24).toString("base64url");
-    // Phone greetings say "thanks for calling"; a website chat gets its own.
-    const greeting = `Hi! I'm the AI assistant for ${org.name}. How can I help you today?`;
-    const call = startCall(db, agent, { channel: "widget", widgetSecretHash: hash(secret), greeting });
-    res.status(201).json({ sessionId: call.id, secret, greeting: call.greeting, language: languageInfo(agent.language).code });
+    // Phone greetings say "thanks for calling"; a website chat gets its own, in the visitor's language.
+    const language = agentLanguages(agent).includes(req.body?.language) ? req.body.language : agent.language;
+    const greeting = phrase(language, "chat", { org: org.name });
+    const call = startCall(db, agent, { channel: "widget", widgetSecretHash: hash(secret), greeting, language });
+    res.status(201).json({ sessionId: call.id, secret, greeting: call.greeting, language: call.language });
   });
 
   const session = (req, res) => {
@@ -64,9 +70,9 @@ export function publicRouter(db) {
     if (!text) return res.status(400).json({ error: "Say something first." });
     const agent = db.get("agents", call.agentId);
     if (!agent) return res.status(404).json({ error: "This assistant is not available." });
-    const { reply, action } = await respond(db, agent, call, text);
+    const { reply, action, language } = await respond(db, agent, call, text);
     if (action) endCall(db, call, action.type === "transfer" ? "transferred" : "completed");
-    res.json({ reply, ended: Boolean(action), transfer: action?.type === "transfer" ? agent.transferNumber || "" : undefined });
+    res.json({ reply, language, ended: Boolean(action), transfer: action?.type === "transfer" ? agent.transferNumber || "" : undefined });
   }));
 
   r.post("/sessions/:id/end", (req, res) => {

@@ -6,9 +6,12 @@
 //   4. We ask the agent's brain for a reply and answer with more TwiML. Repeat.
 import crypto from "node:crypto";
 import express from "express";
-import { respond } from "../agent.js";
 import { endCall, startCall } from "../calls.js";
-import { languageInfo } from "../catalog.js";
+import { greetingFor, respond } from "../agent.js";
+import { findCustomer } from "../customers.js";
+import { agentLanguages, lang, menuLines, phrase, pickLanguage } from "../languages.js";
+import { switchLanguage } from "../tools.js";
+import { escapeXml, sayXml, speakXml } from "../tts.js";
 import { notifyOwner } from "../messaging.js";
 import { canTakeCalls } from "../plans.js";
 import { normalizePhone } from "../util.js";
@@ -22,50 +25,73 @@ export function twilioRouter(db) {
   r.use(express.urlencoded({ extended: false }));
   r.use(verifyTwilioSignature);
 
-  r.post("/voice", (req, res) => {
+  r.post("/voice", wrap(async (req, res) => {
     const to = normalizePhone(req.body.To || "");
     const agent = db.find("agents", (a) => a.phoneNumber && a.phoneNumber === to && a.active)[0];
     if (!agent) return twiml(res, `<Say>Sorry, this number is not set up yet. Goodbye.</Say><Hangup/>`);
     const org = db.get("orgs", agent.orgId);
+    const main = agent.language;
 
     if (!org || !canTakeCalls(db, org)) {
       // Plan minutes used up: never drop the customer, hand them to a person.
       notifyOwner(db, agent.orgId, { kind: "limit", title: "Plan minutes used up", body: `A call from ${req.body.From || "a caller"} was passed to you. Upgrade to keep your receptionist answering.`, urgent: true });
       const human = agent.transferNumber || org?.ownerPhone;
       return twiml(res, human
-        ? `${say(agent, "Please hold while I connect you.")}<Dial>${escapeXml(human)}</Dial>`
-        : `${say(agent, "Sorry, we can't take your call right now. Please try again later. Goodbye.")}<Hangup/>`);
+        ? `${sayXml(agent, main, phrase(main, "connecting"))}<Dial>${escapeXml(human)}</Dial>`
+        : `${sayXml(agent, main, "Sorry, we can't take your call right now. Please try again later. Goodbye.")}<Hangup/>`);
     }
 
+    const callerNumber = normalizePhone(req.body.From || "");
+    const known = findCustomer(db, agent.orgId, callerNumber);
+    const spoken = agentLanguages(agent);
+    // Several languages and no remembered preference: let the caller choose.
+    const menu = spoken.length > 1 && agent.languageMenu !== false && !spoken.includes(known?.preferredLanguage);
     const call = startCall(db, agent, {
       channel: "phone",
-      callerNumber: normalizePhone(req.body.From || ""),
+      callerNumber,
       twilioSid: req.body.CallSid || "",
       silences: 0,
+      ...(menu && { greeting: `[Language menu: ${spoken.map((c) => lang(c).native).join(" · ")}]`, awaitingLanguage: true }),
     });
-    twiml(res, gather(agent, call, call.greeting));
-  });
+    if (menu) return twiml(res, await languageMenu(agent, call));
+    twiml(res, await gather(agent, call, call.greeting));
+  }));
+
+  // The caller pressed a key or said a language name (or said nothing: main language).
+  r.post("/language/:callId", wrap(async (req, res) => {
+    const call = db.get("calls", req.params.callId);
+    const agent = call && db.get("agents", call.agentId);
+    if (!call || !agent || call.status === "ended") return twiml(res, "<Hangup/>");
+    const code = pickLanguage(agent, { digits: req.body.Digits, speech: req.body.SpeechResult }) ?? agent.language;
+    switchLanguage(db, agent, call, code, "menu");
+    const customer = call.customerId ? db.get("customers", call.customerId) : null;
+    if (customer) db.update("customers", customer.id, { preferredLanguage: code });
+    const greeting = greetingFor(agent, customer, code, db.get("orgs", agent.orgId)?.name);
+    call.transcript.push({ role: "agent", text: greeting, at: new Date().toISOString() });
+    db.update("calls", call.id, { greeting, awaitingLanguage: false, transcript: call.transcript });
+    twiml(res, await gather(agent, call, greeting));
+  }));
 
   // Campaign calls: Twilio fetches this when the person picks up.
-  r.post("/outbound/:callId", (req, res) => {
+  r.post("/outbound/:callId", wrap(async (req, res) => {
     const call = db.get("calls", req.params.callId);
     const agent = call && db.get("agents", call.agentId);
     if (!call || !agent || call.status === "ended") return twiml(res, "<Hangup/>");
     db.update("calls", call.id, { answeredAt: new Date().toISOString(), twilioSid: req.body.CallSid || call.twilioSid });
-    twiml(res, gather(agent, call, call.greeting));
-  });
+    twiml(res, await gather(agent, call, call.greeting));
+  }));
 
   r.post("/gather/:callId", wrap(async (req, res) => {
     const call = db.get("calls", req.params.callId);
     const agent = call && db.get("agents", call.agentId);
     if (!call || !agent || call.status === "ended") return twiml(res, "<Hangup/>");
+    const code = () => call.language ?? agent.language;
 
     // The owner pressed "Take over" in the live view.
     const owner = db.get("orgs", agent.orgId)?.ownerPhone || agent.transferNumber;
     if (call.takeover && owner) {
-      const human = owner;
       endCall(db, call, "taken-over");
-      return twiml(res, `${say(agent, "One moment, I'm connecting you to the team now.")}<Dial>${escapeXml(human)}</Dial>`);
+      return twiml(res, `${await speakXml(agent, code(), phrase(code(), "connecting"))}<Dial>${escapeXml(owner)}</Dial>`);
     }
 
     const heard = String(req.body.SpeechResult || "").trim();
@@ -74,25 +100,27 @@ export function twilioRouter(db) {
       db.update("calls", call.id, { silences });
       if (silences > MAX_SILENCES) {
         endCall(db, call, "no-response");
-        return twiml(res, `${say(agent, "I can't hear anything, so I'll hang up now. Please call again. Goodbye.")}<Hangup/>`);
+        return twiml(res, `${await speakXml(agent, code(), phrase(code(), "noInput"))}<Hangup/>`);
       }
-      return twiml(res, gather(agent, call, "Sorry, I didn't catch that. Could you say it again?"));
+      return twiml(res, await gather(agent, call, phrase(code(), "retry")));
     }
 
     db.update("calls", call.id, { silences: 0 });
+    // respond() may switch call.language; the reply is then spoken (and the
+    // next turn heard) in the new language.
     const { reply, action } = await respond(db, agent, call, heard);
     if (action?.type === "hangup") {
       endCall(db, call, "completed");
-      return twiml(res, `${say(agent, reply)}<Hangup/>`);
+      return twiml(res, `${await speakXml(agent, code(), reply)}<Hangup/>`);
     }
     if (action?.type === "transfer") {
       const human = agent.transferNumber || db.get("orgs", agent.orgId)?.ownerPhone;
       if (human) {
         endCall(db, call, "transferred");
-        return twiml(res, `${say(agent, reply)}<Dial>${escapeXml(human)}</Dial>`);
+        return twiml(res, `${await speakXml(agent, code(), reply)}<Dial>${escapeXml(human)}</Dial>`);
       }
     }
-    twiml(res, gather(agent, call, reply));
+    twiml(res, await gather(agent, call, reply));
   }));
 
   // Set as the number's "Call status changes" webhook (campaign calls set it
@@ -110,17 +138,25 @@ export function twilioRouter(db) {
   return r;
 }
 
-function say(agent, text) {
-  const lang = languageInfo(agent.language);
-  return `<Say voice="${escapeXml(agent.voice || lang.voice)}" language="${lang.code}">${escapeXml(text)}</Say>`;
-}
-
-function gather(agent, call, text) {
-  const lang = languageInfo(agent.language);
+/** Say `text`, then listen, both in the call's current language. */
+async function gather(agent, call, text) {
+  const code = call.language ?? agent.language;
   return (
     `<Gather input="speech" action="/twilio/gather/${call.id}" method="POST" ` +
-    `language="${lang.code}" speechTimeout="auto" actionOnEmptyResult="true">` +
-    `${say(agent, text)}</Gather>`
+    `language="${lang(code).code}" speechTimeout="auto" actionOnEmptyResult="true">` +
+    `${await speakXml(agent, code, text)}</Gather>`
+  );
+}
+
+/** "For English, press 1. हिंदी के लिए 2 दबाइए। ..." Each line in its own language's voice. */
+async function languageMenu(agent, call) {
+  const lines = menuLines(agent);
+  const hints = agentLanguages(agent).flatMap((c) => lang(c).keywords).join(",");
+  const spoken = (await Promise.all(lines.map((l) => speakXml(agent, l.code, l.text)))).join("");
+  return (
+    `<Gather input="dtmf speech" numDigits="1" timeout="6" action="/twilio/language/${call.id}" method="POST" ` +
+    `language="${lang(agent.language).code}" hints="${escapeXml(hints)}">${spoken}</Gather>` +
+    `<Redirect method="POST">/twilio/language/${call.id}</Redirect>`
   );
 }
 
@@ -128,9 +164,7 @@ function twiml(res, body) {
   res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response>${body}</Response>`);
 }
 
-export function escapeXml(text) {
-  return String(text).replace(/[<>&'"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "'": "&apos;", '"': "&quot;" })[c]);
-}
+export { escapeXml };
 
 // Proves a request really came from Twilio, so nobody can fake calls.
 // Twilio signs: full URL + each POST param (sorted by name, key then value),

@@ -1,6 +1,7 @@
 // After every call: AI writes a summary, the caller's intent, sentiment and a
 // lead score. Hot leads and unhappy callers alert the owner.
 import { aiEnabled, objectSchema, structured } from "./llm.js";
+import { lang } from "./languages.js";
 import { notifyOwner } from "./messaging.js";
 
 const INTENTS = ["booking", "enquiry", "reschedule_or_cancel", "complaint", "sales_lead", "emergency", "wrong_number", "other"];
@@ -72,7 +73,7 @@ function heuristicAnalysis(call, outcomes) {
     intent,
     sentiment: negative ? "negative" : outcomes.booked ? "positive" : "neutral",
     leadScore: outcomes.booked ? "hot" : outcomes.leads ? "warm" : intent === "sales_lead" ? "warm" : "none",
-    language: "Unknown (demo mode)",
+    language: lang(call.language || "en-IN").name,
     followUpNeeded: Boolean(outcomes.leads) || negative,
     followUpNote: negative ? "Call the customer back and apologise." : outcomes.leads ? "Call back about their enquiry." : "",
   };

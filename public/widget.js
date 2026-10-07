@@ -25,6 +25,8 @@
       header { background: ${color}; color: #fff; padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; }
       header b { display: block; font-size: 15px; } header small { opacity: .85; font-size: 12px; }
       header button { background: none; border: 0; color: #fff; font-size: 22px; cursor: pointer; line-height: 1; }
+      header select { margin-left: auto; margin-right: 8px; background: rgba(255,255,255,.15); color: #fff; border: 1px solid rgba(255,255,255,.35); border-radius: 8px; padding: 4px 6px; font-size: 13px; }
+      header select option { color: #10201c; }
       .log { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 8px; background: #f7f6f2; }
       .m { max-width: 85%; padding: 8px 12px; border-radius: 14px; font-size: 14px; line-height: 1.4; }
       .a { background: #fff; border: 1px solid #e6e2d8; } .u { background: ${color}; color: #fff; align-self: flex-end; } .s { align-self: center; font-size: 12px; color: #6b7c77; }
@@ -35,7 +37,7 @@
       .foot { text-align: center; font-size: 11px; color: #6b7c77; padding: 0 0 8px; }
     </style>
     <div class="panel" role="dialog" aria-label="Chat with us">
-      <header><div><b class="title">Talk to us</b><small>AI assistant · usually replies instantly</small></div><button class="close" aria-label="Close">×</button></header>
+      <header><div><b class="title">Talk to us</b><small>AI assistant · usually replies instantly</small></div><select class="langs" aria-label="Language" hidden></select><button class="close" aria-label="Close">×</button></header>
       <div class="log" aria-live="polite"></div>
       <form><input placeholder="Type or tap the mic…" aria-label="Message" maxlength="1000">${Recognition ? '<button type="button" class="mic" aria-label="Speak">🎤</button>' : ""}<button class="send">Send</button></form>
       <div class="foot">Powered by VoiceDesk</div>
@@ -74,15 +76,38 @@
     return data;
   }
 
+  let info = null;
+  let chosen = ""; // language picked in the header menu ("" = the business's main language)
+
   async function open() {
     $(".panel").classList.add("open");
     if (session) return;
     try {
-      const info = await fetch(`${origin}/api/public/agents/${encodeURIComponent(agentId)}`).then((r) => r.json());
-      if (info.business) $(".title").textContent = info.business;
-      session = await post(`/agents/${encodeURIComponent(agentId)}/sessions`);
+      if (!info) {
+        info = await fetch(`${origin}/api/public/agents/${encodeURIComponent(agentId)}`).then((r) => r.json());
+        if (info.business) $(".title").textContent = info.business;
+        const langs = info.languages || [];
+        if (langs.length > 1) {
+          const select = $(".langs");
+          // Pre-select the visitor's browser language when the business speaks it.
+          const browser = (navigator.languages || [navigator.language]).map((l) => l.split("-")[0]);
+          const match = langs.find((l) => browser.includes(l.code.split("-")[0]) && l.code !== "en-US");
+          chosen = match ? match.code : "";
+          select.innerHTML = langs.map((l) => `<option value="${l.code}">${l.native}</option>`).join("");
+          select.value = chosen || info.language;
+          select.hidden = false;
+          select.onchange = () => {
+            chosen = select.value;
+            session = null; // start over in the new language
+            log.innerHTML = "";
+            open();
+          };
+        }
+      }
+      session = await post(`/agents/${encodeURIComponent(agentId)}/sessions`, chosen ? { language: chosen } : {});
       lang = session.language || lang;
       add("a", session.greeting);
+      speak(session.greeting);
     } catch (e) {
       add("s", e.message);
     }
@@ -98,6 +123,11 @@
     try {
       const r = await post(`/sessions/${session.sessionId}/say`, { secret: session.secret, text });
       typing.remove();
+      if (r.language && r.language !== lang) {
+        lang = r.language; // the assistant followed the visitor into another language
+        const select = $(".langs");
+        if (!select.hidden) select.value = lang;
+      }
       add("a", r.reply);
       speak(r.reply);
       if (r.transfer) add("s", `Call us: ${r.transfer}`);

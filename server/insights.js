@@ -59,6 +59,7 @@ export function insights(db, org, { days = 30, now = new Date() } = {}) {
     leads: leads.length,
     leadScores: count(leads, (l) => l.score),
     intents: count(analysed, (c) => c.analysis.intent),
+    languages: count(calls, (c) => c.language),
     sentiment: count(analysed, (c) => c.analysis.sentiment),
     openQuestions: mine("questions", (q) => q.status === "open").length,
     unseenAlerts: mine("alerts", (a) => !a.seen).length,

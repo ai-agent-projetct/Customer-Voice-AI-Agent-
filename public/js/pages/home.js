@@ -113,6 +113,8 @@ route("overview", async () => {
       <div class="panel"><h2>Plan usage</h2>
         <p><b>${h(u.planLabel)}</b> · ${Math.round(u.minutesUsed)} ${u.minutesIncluded ? `of ${u.minutesIncluded}` : ""} minutes this month</p>
         ${u.minutesIncluded ? `<div class="meter" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><span style="width:${pct}%"></span></div>` : ""}
+        <h2 style="margin-top:18px">Languages callers used</h2>
+        ${Object.keys(ins.languages || {}).length ? `<div class="chips">${Object.entries(ins.languages).sort((a, b) => b[1] - a[1]).map(([code, v]) => pill(`${state.catalog.languages.find((l) => l.code === code)?.native ?? code} · ${v}`, "grey")).join(" ")}</div>` : `<p class="muted">Appears after your first calls.</p>`}
         <h2 style="margin-top:18px">What callers wanted</h2>
         ${Object.keys(ins.intents).length ? `<div class="chips">${Object.entries(ins.intents).sort((a, b) => b[1] - a[1]).map(([k, v]) => pill(`${k.replace(/_/g, " ")} · ${v}`, "grey")).join(" ")}</div>` : `<p class="muted">Appears after your first analysed calls.</p>`}
       </div>

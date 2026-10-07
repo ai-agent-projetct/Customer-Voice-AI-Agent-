@@ -6,6 +6,7 @@
 //   - every call opens by saying it is an AI assistant and which business it's from
 import { startCall } from "./calls.js";
 import { findCustomer } from "./customers.js";
+import { agentLanguages, phrase } from "./languages.js";
 import { planOf, usage } from "./plans.js";
 import { dialer, publicUrl } from "./telephony.js";
 import { localParts, normalizePhone } from "./util.js";
@@ -29,9 +30,16 @@ export function parseContacts(text) {
   return contacts;
 }
 
-export function disclosureGreeting(org, contact, openingLine) {
+/** "Hello Meena, this is an AI assistant calling from Glow Salon." in the call's language, then the owner's line. */
+export function disclosureGreeting(org, contact, openingLine, code = "en-IN") {
   const first = contact.name?.split(/\s+/)[0];
-  return `Hello${first ? ` ${first}` : ""}, this is an AI assistant calling from ${org.name}. ${openingLine}`.trim();
+  return `${phrase(code, "aiCall", { name: first ? ` ${first}` : "", org: org.name })} ${openingLine}`.trim();
+}
+
+/** Campaign calls use the customer's remembered language, else the campaign's. */
+export function campaignLanguage(agent, campaign, customer) {
+  const spoken = agentLanguages(agent);
+  return [customer?.preferredLanguage, campaign.language].find((c) => c && spoken.includes(c)) ?? agent.language;
 }
 
 function inWindow(campaign, timeZone, now) {
@@ -65,12 +73,14 @@ export async function dialCampaigns(db, now = new Date()) {
         contact.result = "On do-not-call list";
         continue;
       }
+      const language = campaignLanguage(agent, campaign, customer);
       const call = startCall(db, agent, {
         channel: "phone",
         direction: "outbound",
         callerNumber: contact.phone,
         campaignId: campaign.id,
-        greeting: disclosureGreeting(org, contact, campaign.openingLine),
+        language,
+        greeting: disclosureGreeting(org, contact, campaign.openingLine, language),
         silences: 0,
       });
       contact.status = "calling";

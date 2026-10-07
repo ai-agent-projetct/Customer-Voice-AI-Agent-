@@ -98,3 +98,27 @@ test("post-call analysis asks Claude for structured JSON and stores it", async (
   // A hot lead without a booking alerts the owner.
   assert.equal(db.find("alerts", (a) => a.kind === "hot_lead").length, 1);
 });
+
+test("a language change mid-call reaches Claude as a system note, and switch_language is offered", async () => {
+  const db = new Store(null);
+  const agent = db.insert("agents", {
+    orgId: "o2", name: "Salon", language: "en-IN", languages: ["ta-IN"], greeting: "Hi!", businessInfo: "", instructions: "",
+    services: [], bookingEnabled: false, transferNumber: "", hours: DEFAULT_HOURS, timeZone: "Asia/Kolkata",
+  });
+  const call = db.insert("calls", { orgId: "o2", agentId: agent.id, transcript: [], messages: [], language: "en-IN", channel: "web" });
+  replies = [[{ type: "text", text: "Hello!" }], [{ type: "text", text: "வணக்கம்!" }]];
+  const before = requests.length;
+  await respond(db, agent, call, "Hello");
+  const first = requests[before].body;
+  assert.ok(first.tools.some((t) => t.name === "switch_language" && t.input_schema.properties.language.enum.includes("ta-IN")));
+  assert.match(first.system, /The call is currently in English \(India\)/);
+
+  // The caller writes in Tamil: the call switches and Claude is told, without changing the system prompt.
+  const { language } = await respond(db, agent, call, "நாளை நேரம் கிடைக்குமா");
+  assert.equal(language, "ta-IN");
+  const second = requests[before + 1].body;
+  assert.equal(second.system, first.system);
+  const [user, note] = second.messages.slice(-2);
+  assert.equal(user.role, "user");
+  assert.deepEqual(note, { role: "system", content: "The call is now in Tamil. Reply only in Tamil from now on." });
+});

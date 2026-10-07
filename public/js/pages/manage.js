@@ -28,6 +28,7 @@ async function newCampaign() {
         <label>Campaign name<input name="name" required placeholder="Win-back: October"></label>
         <label>Receptionist making the calls<select name="agentId">${agents.map((a) => `<option value="${h(a.id)}">${h(a.name)}</option>`).join("")}</select></label>
       </div>
+      <label>Language of the calls <span class="hint">— customers who chose a language before are called in theirs</span><select name="language" id="camp-lang"></select></label>
       <label>Goal of the call <span class="hint">— what the receptionist should achieve</span><textarea name="goal" required placeholder="Invite customers who haven't visited in 2 months back with 10% off this week. Offer to book a slot."></textarea></label>
       <label>Opening line <span class="hint">— said after "Hello [name], this is an AI assistant calling from ${h(org)}." (added automatically)</span><input name="openingLine" required placeholder="We've missed you! We have a special offer this week. Do you have a minute?"></label>
       <label>Contacts <span class="hint">— one per line: name, phone</span><textarea name="contacts" required style="min-height:140px" placeholder="Meena, 98111 22233&#10;Arjun, +91 98111 22234"></textarea></label>
@@ -41,6 +42,13 @@ async function newCampaign() {
       <div class="save-bar"><button class="btn btn-primary">Create campaign</button></div>
     </form>`);
   const form = document.getElementById("camp");
+  const langOptions = () => {
+    const agent = agents.find((x) => x.id === form.agentId.value);
+    const codes = agent ? [agent.language, ...(agent.languages || [])] : [];
+    form.language.innerHTML = codes.map((c) => `<option value="${c}">${h(state.catalog.languages.find((l) => l.code === c)?.native ?? c)}</option>`).join("");
+  };
+  form.agentId.onchange = langOptions;
+  langOptions();
   form.querySelectorAll("[data-lapsed]").forEach((b) => {
     b.onclick = async () => {
       const people = await api("GET", `/campaigns/audience/lapsed?days=${b.dataset.lapsed}`);
@@ -69,7 +77,7 @@ async function campaignDetail(id) {
       <div>${c.status === "running" ? `<button class="btn" id="pause">Pause</button>` : c.status !== "completed" ? `<button class="btn btn-primary" id="start">Start calling</button>` : ""}</div></div>
     ${c.lastError ? `<div class="banner bad">${h(c.lastError)}</div>` : ""}
     <div class="stats"><div class="stat"><span>Contacts</span><b>${s.total}</b></div><div class="stat"><span>Reached</span><b>${s.done}</b></div><div class="stat"><span>No answer / failed</span><b>${s.failed}</b></div><div class="stat"><span>Skipped (do not call)</span><b>${s.skipped}</b></div></div>
-    <div class="panel"><p><b>Goal:</b> ${h(c.goal)}</p><p><b>Opening:</b> "Hello [name], this is an AI assistant calling from ${h(state.org.name)}. ${h(c.openingLine)}"</p></div>
+    <div class="panel"><p><b>Goal:</b> ${h(c.goal)}</p><p><b>Language:</b> ${h(state.catalog.languages.find((l) => l.code === c.language)?.native ?? "Main language")} (customers with a saved language hear theirs)</p><p><b>Opening:</b> "Hello [name], this is an AI assistant calling from ${h(state.org.name)}. ${h(c.openingLine)}" (said in the call's language)</p></div>
     <div class="panel"><div class="table-wrap"><table><thead><tr><th>Name</th><th>Phone</th><th>Status</th><th>Result</th></tr></thead><tbody>
       ${c.contacts.map((x) => `<tr ${x.callId && x.status !== "pending" ? `class="click" data-href="#call/${h(x.callId)}"` : ""}><td>${h(x.name)}</td><td>${h(x.phone)}</td><td>${pill(x.status, x.status === "done" ? "" : x.status === "calling" ? "live" : "grey")}</td><td>${h(x.result)}</td></tr>`).join("")}
     </tbody></table></div></div>`);

@@ -11,7 +11,7 @@ route("agents", async () => {
     ${agents.length ? `<div class="agent-cards">${agents.map((a) => `
       <div class="agent-card">
         <div class="row-between"><strong>${h(a.name)}</strong>${pill(a.active ? "Active" : "Paused", a.active ? "" : "grey")}</div>
-        <span class="muted">${h(lang(a.language))} · ${a.phoneNumber ? h(a.phoneNumber) : "No number yet"}${a.widgetEnabled ? " · Website chat on" : ""}</span>
+        <span class="muted">${h([a.language, ...(a.languages || [])].map((c) => state.catalog.languages.find((l) => l.code === c)?.native).join(" · "))}<br>${a.phoneNumber ? h(a.phoneNumber) : "No number yet"}${a.widgetEnabled ? " · Website chat on" : ""}</span>
         <div class="actions"><a class="btn btn-primary" href="#agent/${h(a.id)}">Edit & test</a><a class="btn" href="#agent/${h(a.id)}/lab">Test Lab</a></div>
       </div>`).join("")}</div>` : ""}
     <div class="panel" style="margin-top:18px"><h2>${agents.length ? "Add another receptionist" : "Create your first receptionist"}</h2>
@@ -31,14 +31,17 @@ route("agents", async () => {
   });
 });
 
-const TABS = ["Basics", "Knowledge", "Services & hours", "Phone & website", "Test Lab"];
+const TABS = ["Basics", "Languages & voice", "Knowledge", "Services & hours", "Phone & website", "Test Lab"];
+const LAB = 5;
 
 route("agent", async (id) => {
   const [agentId, tab] = id.split("/").length > 1 ? id.split("/") : [id, location.hash.split("/")[2]];
   const a = await api("GET", `/agents/${agentId}`);
   const { languages } = state.catalog;
   const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const startTab = tab === "lab" ? 4 : 0;
+  const startTab = tab === "lab" ? LAB : tab === "languages" ? 1 : 0;
+  const premium = state.catalog.premiumVoice;
+  const spokenNow = [a.language, ...(a.languages || [])];
   const embed = `<script src="${location.origin}/widget.js" data-agent="${a.publicId || ""}" async></script>`;
 
   shell("agents", `
@@ -49,15 +52,28 @@ route("agent", async (id) => {
 
         <div data-pane="0">
           <label>Name<input name="name" value="${h(a.name)}" required></label>
-          <div class="row">
-            <label>Main language<select name="language">${languages.map((l) => `<option value="${l.code}" ${l.code === a.language ? "selected" : ""}>${h(l.name)}</option>`).join("")}</select></label>
-            <label>Phone voice <span class="hint">(Twilio voice name)</span><input name="voice" value="${h(a.voice)}"></label>
-          </div>
-          <label>Greeting <span class="hint">— the first thing callers hear. Returning callers are also welcomed by name.</span><textarea name="greeting" style="min-height:70px">${h(a.greeting)}</textarea></label>
+          <label>Greeting in the main language <span class="hint">— the first thing callers hear. Returning callers are also welcomed by name. Other languages: see "Languages & voice".</span><textarea name="greeting" style="min-height:70px">${h(a.greeting)}</textarea></label>
           <label class="check"><input type="checkbox" name="active" ${a.active ? "checked" : ""}> Answer calls (turn off to pause)</label>
         </div>
 
         <div data-pane="1" class="hidden">
+          <div class="row">
+            <label>Main language <span class="hint">— used when the caller doesn't choose</span><select name="language">${languages.map((l) => `<option value="${l.code}" ${l.code === a.language ? "selected" : ""}>${h(l.name)} · ${h(l.native)}</option>`).join("")}</select></label>
+            <label>Voice<select name="voiceGender"><option value="female" ${a.voiceGender !== "male" ? "selected" : ""}>Female</option><option value="male" ${a.voiceGender === "male" ? "selected" : ""}>Male</option></select></label>
+          </div>
+          <div class="label">Also speaks <span class="hint">— callers can pick these, or just start speaking them</span></div>
+          <div class="lang-grid" id="extra-langs">${languages.map((l) => `<label class="lang-chip"><input type="checkbox" name="extraLang" value="${l.code}" ${(a.languages || []).includes(l.code) ? "checked" : ""}><b>${h(l.native)}</b><span>${h(l.name)}</span></label>`).join("")}</div>
+          <label class="check" style="margin-top:14px"><input type="checkbox" name="languageMenu" ${a.languageMenu !== false ? "checked" : ""}> Start phone calls with a language menu ("For English press 1, हिंदी के लिए 2 दबाइए…"). Returning callers skip it: their language is remembered.</label>
+          <div class="row">
+            <label>Speaking speed<select name="speakingRate">${[["slow", "Slower (good for elderly callers)"], ["normal", "Normal"], ["fast", "Faster"]].map(([v, t]) => `<option value="${v}" ${(a.speakingRate || "normal") === v ? "selected" : ""}>${t}</option>`).join("")}</select></label>
+            <label>Voice quality<select name="voiceEngine"><option value="standard">Standard voices (all languages)</option><option value="premium" ${a.voiceEngine === "premium" ? "selected" : ""} ${premium.available ? "" : "disabled"}>Premium natural voice${premium.available ? "" : " (not set up on server)"}</option></select></label>
+          </div>
+          ${premium.available ? `<p class="muted small">Premium voice covers: ${h(premium.languages.map((c) => languages.find((l) => l.code === c)?.name || c).join(", "))}. Other languages use standard voices.</p>` : ""}
+          <div class="row-between" style="margin-top:8px"><div class="label">Greeting and voice for each language</div><button type="button" class="btn small" id="translate">✨ Translate greetings with AI</button></div>
+          <div id="lang-rows"></div>
+        </div>
+
+        <div data-pane="2" class="hidden">
           <div class="assistant">
             <b>✨ AI setup assistant</b>
             <p class="muted small">Paste your website or Google listing link, or your menu, price list or rough notes in any language. It writes your receptionist's knowledge for you to review.</p>
@@ -73,7 +89,7 @@ route("agent", async (id) => {
           <button type="button" class="btn small" id="add-faq">+ Add question & answer</button>
         </div>
 
-        <div data-pane="2" class="hidden">
+        <div data-pane="3" class="hidden">
           <label class="check"><input type="checkbox" name="bookingEnabled" ${a.bookingEnabled ? "checked" : ""}> Let callers book, check, cancel and reschedule appointments</label>
           <div class="label">Services and prices <span class="hint">— prices power your revenue report</span></div>
           <div id="services"></div>
@@ -90,7 +106,7 @@ route("agent", async (id) => {
           </div>
         </div>
 
-        <div data-pane="3" class="hidden">
+        <div data-pane="4" class="hidden">
           <label>Phone number that rings this receptionist <span class="hint">— your Twilio number, e.g. +918045671234</span><input name="phoneNumber" value="${h(a.phoneNumber)}" placeholder="+91…"></label>
           <label>Transfer calls to <span class="hint">— staff mobile for "speak to a person" (otherwise your number from Settings)</span><input name="transferNumber" value="${h(a.transferNumber)}" placeholder="+91…"></label>
           <p class="muted small">See <a href="#settings">Settings → Phone setup</a> for connecting a number.</p>
@@ -103,7 +119,7 @@ route("agent", async (id) => {
           </div>
         </div>
 
-        <div data-pane="4" class="hidden" id="lab"></div>
+        <div data-pane="5" class="hidden" id="lab"></div>
 
         <p class="error" id="err" role="alert"></p>
         <div class="save-bar" id="save-bar"><button class="btn btn-primary">Save changes</button><button type="button" class="btn btn-danger" id="delete">Delete</button></div>
@@ -112,7 +128,7 @@ route("agent", async (id) => {
         <h2>Test call</h2>
         <p class="muted">Talk to your receptionist like a customer would, with your microphone (Chrome works best) or by typing.</p>
         <div class="chat" id="chat"><div class="msg system">Press "Start test call" to begin.</div></div>
-        <div class="phone-controls" id="controls"><button class="btn btn-primary" id="start" style="width:100%">Start test call</button></div>
+        <div class="phone-controls" id="controls"><select id="test-lang" aria-label="Language for the test call">${spokenNow.map((c) => `<option value="${c}">${h(languages.find((l) => l.code === c)?.native || c)}</option>`).join("")}</select><button class="btn btn-primary" id="start" style="flex:1">Start test call</button></div>
       </div>
     </div>`);
 
@@ -120,11 +136,72 @@ route("agent", async (id) => {
   const showTab = (i) => {
     form.querySelectorAll("[data-tab]").forEach((t) => t.classList.toggle("active", Number(t.dataset.tab) === i));
     form.querySelectorAll("[data-pane]").forEach((p) => p.classList.toggle("hidden", Number(p.dataset.pane) !== i));
-    document.getElementById("save-bar").classList.toggle("hidden", i === 4);
-    if (i === 4) renderLab(a);
+    document.getElementById("save-bar").classList.toggle("hidden", i === LAB);
+    if (i === LAB) renderLab(a);
   };
   form.querySelectorAll("[data-tab]").forEach((t) => (t.onclick = () => showTab(Number(t.dataset.tab))));
-  form.language.onchange = () => { form.voice.value = languages.find((l) => l.code === form.language.value).voice; };
+  // ---- Languages & voice ----
+  const langName = (c) => languages.find((l) => l.code === c);
+  const greetings = { ...(a.greetings || {}) };
+  const voices = { ...(a.voices || {}) };
+  if (a.voice && !voices[a.language]) voices[a.language] = a.voice; // older setting: one voice for the main language
+  const enabled = () => [form.language.value, ...[...form.querySelectorAll("[name=extraLang]:checked")].map((c) => c.value).filter((c) => c !== form.language.value)];
+  const rememberRows = () => {
+    document.querySelectorAll("[data-greet]").forEach((t) => (greetings[t.dataset.greet] = t.value));
+    document.querySelectorAll("[data-voice]").forEach((t) => (voices[t.dataset.voice] = t.value));
+  };
+  const drawLangRows = () => {
+    const main = form.language.value;
+    form.querySelectorAll("[name=extraLang]").forEach((c) => {
+      c.disabled = c.value === main;
+      c.closest("label").classList.toggle("is-main", c.value === main);
+    });
+    document.getElementById("lang-rows").innerHTML = enabled().map((code) => {
+      const l = langName(code);
+      const defaultVoice = l.voices[form.voiceGender.value];
+      return `<div class="lang-row">
+        <div class="lang-head"><b>${h(l.native)}</b> <span class="muted small">${h(l.name)}${code === main ? " · main language" : ""}</span>
+          <button type="button" class="btn small" data-preview="${code}">▶ Preview</button></div>
+        ${code === main
+          ? `<p class="muted small">Greeting: set in Basics.</p>`
+          : `<textarea data-greet="${code}" placeholder="Leave empty to use the built-in ${h(l.name)} greeting" style="min-height:52px">${h(greetings[code] || "")}</textarea>`}
+        <input data-voice="${code}" placeholder="Voice: ${h(defaultVoice)} (default)" value="${h(voices[code] || "")}" aria-label="${h(l.name)} voice">
+      </div>`;
+    }).join("");
+    document.querySelectorAll("[data-preview]").forEach((b) => (b.onclick = () => previewVoice(b.dataset.preview)));
+  };
+  // Browser preview: an approximation of the phone voice, using your device's voices.
+  const previewVoice = (code) => {
+    if (!("speechSynthesis" in window)) return toast("Your browser can't play voices");
+    const text = code === form.language.value ? form.greeting.value : document.querySelector(`[data-greet="${code}"]`)?.value || langName(code).greeting.replace("{org}", state.org.name);
+    const u = new SpeechSynthesisUtterance(text || form.greeting.value);
+    u.lang = code;
+    u.rate = { slow: 0.85, normal: 1, fast: 1.12 }[form.speakingRate.value];
+    const match = speechSynthesis.getVoices().find((v) => v.lang.replace("_", "-") === code);
+    if (match) u.voice = match;
+    else toast("Your device has no voice for this language; phone calls will still use it.");
+    speechSynthesis.cancel();
+    speechSynthesis.speak(u);
+  };
+  form.language.onchange = () => { rememberRows(); drawLangRows(); };
+  form.voiceGender.onchange = () => { rememberRows(); drawLangRows(); };
+  document.getElementById("extra-langs").onchange = () => { rememberRows(); drawLangRows(); };
+  document.getElementById("translate").onclick = async (e) => {
+    rememberRows();
+    e.target.disabled = true;
+    try {
+      if (!(await save())) return;
+      const out = await api("POST", `/agents/${a.id}/translate-greetings`, { greeting: form.greeting.value });
+      Object.assign(greetings, out.greetings);
+      drawLangRows();
+      toast(out.demo ? "Filled with built-in greetings (demo mode). Review, then Save." : "Greetings translated. Review, then Save.");
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      e.target.disabled = false;
+    }
+  };
+  drawLangRows();
   form.widgetEnabled.onchange = () => document.getElementById("embed").classList.toggle("hidden", !form.widgetEnabled.checked);
   document.getElementById("copy-embed").onclick = () => navigator.clipboard?.writeText(document.getElementById("embed-code").textContent).then(() => toast("Copied"));
 
@@ -161,7 +238,14 @@ route("agent", async (id) => {
   const collect = () => ({
     name: form.name.value.trim(),
     language: form.language.value,
-    voice: form.voice.value.trim(),
+    languages: enabled().slice(1),
+    languageMenu: form.languageMenu.checked,
+    voiceGender: form.voiceGender.value,
+    speakingRate: form.speakingRate.value,
+    voiceEngine: form.voiceEngine.value,
+    voice: "",
+    greetings: (rememberRows(), Object.fromEntries(Object.entries(greetings).filter(([c, t]) => t && enabled().includes(c)))),
+    voices: Object.fromEntries(Object.entries(voices).filter(([c, v]) => v && enabled().includes(c))),
     greeting: form.greeting.value.trim(),
     active: form.active.checked,
     businessInfo: form.businessInfo.value,
@@ -197,7 +281,14 @@ route("agent", async (id) => {
     await api("DELETE", `/agents/${a.id}`);
     location.hash = "#agents";
   };
-  mountTestCall(a, save);
+  mountTestCall(a, save, () => document.getElementById("test-lang").value);
+  const refreshTestLangs = () => {
+    const sel = document.getElementById("test-lang");
+    if (!sel) return;
+    const keep = sel.value;
+    sel.innerHTML = enabled().map((c) => `<option value="${c}" ${c === keep ? "selected" : ""}>${h(langName(c).native)}</option>`).join("");
+  };
+  form.addEventListener("change", refreshTestLangs);
   showTab(startTab);
 });
 

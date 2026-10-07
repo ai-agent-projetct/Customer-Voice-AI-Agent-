@@ -14,6 +14,7 @@ such as Hinglish.
 | Area | Features |
 |---|---|
 | **Receptionist** | Industry templates · **AI setup assistant** (from a website link or notes) · services with prices · opening hours · FAQs · 10 languages and code-mixing |
+| **Languages & voice** | Speaks **English + 9 Indian languages** on one number · **"choose your language" menu** (each option in its own voice) · **switches language mid-call** when asked, or when the caller speaks or types in another script · **remembers each customer's language** · female/male voices · slower speech for elderly callers · AI-translated greetings · optional **premium natural voices** |
 | **On the call** | Book / check / **cancel / reschedule** by voice · save leads · send info on WhatsApp · **alert the owner** · transfer to a person · respects "don't call me" |
 | **Gets smarter** | **"Teach it"**: questions it couldn't answer become answers · **caller memory** (greets returning callers by name, knows their bookings) |
 | **Quality** | **Readiness Test Lab**: AI role-plays tough callers and an AI examiner scores the receptionist with exact fixes |
@@ -62,6 +63,8 @@ server/
   index.js            starts the web server and the background scheduler
   agent.js            the AI brain: system prompt + Claude + tool loop (+ demo brain)
   tools.js            what the receptionist can do on a call, with the business rules
+  languages.js        the 10 languages: voices, menu lines, greetings, phrases, script detection
+  tts.js              how replies are spoken: standard voices, speed, premium natural voices
   llm.js              Claude client: messages, structured JSON, refusal fallbacks
   calls.js            call lifecycle (start, end, then analysis)
   analysis.js         post-call AI analysis and owner alerts

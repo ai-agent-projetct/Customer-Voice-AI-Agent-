@@ -3,6 +3,8 @@
 import { api, bindRowLinks, download, emptyState, fmtDate, fmtDuration, h, pill, refreshBadges, route, rupees, shell, state, toast, tone } from "../core.js";
 
 const CHANNEL = { phone: "Phone", web: "Test", widget: "Website" };
+const SWITCH = { menu: "chosen in menu", tool: "asked to switch", detected: "detected from speech" };
+const native = (code) => state.catalog.languages.find((l) => l.code === code)?.native ?? code;
 
 export function callsTable(calls) {
   if (!calls.length) return emptyState("No calls yet. Make a test call from a receptionist's page.");
@@ -35,7 +37,8 @@ route("call", async (id) => {
   const a = c.analysis;
   shell("calls", `
     <div class="page-head"><div><a href="#calls">← Calls</a><h1>Call with ${h(c.agentName)}</h1>
-      <p class="muted">${fmtDate(c.createdAt)} · ${c.callerNumber ? h(c.callerNumber) : CHANNEL[c.channel]} · ${fmtDuration(c.durationSec)} · ${h(c.outcome || c.status)}</p></div>
+      <p class="muted">${fmtDate(c.createdAt)} · ${c.callerNumber ? h(c.callerNumber) : CHANNEL[c.channel]} · ${fmtDuration(c.durationSec)} · ${h(c.outcome || c.status)}</p>
+      ${c.languageLog?.length ? `<div class="chips">${c.languageLog.map((l) => pill(`${native(l.code)}${l.reason === "start" ? "" : ` · ${SWITCH[l.reason] || l.reason}`}`, "grey")).join(" → ")}</div>` : ""}</div>
       ${c.customer ? `<a class="btn" href="#customer/${h(c.customer.id)}">Customer profile</a>` : ""}</div>
     ${a ? `<div class="panel analysis">
       <h2>AI analysis</h2><p>${h(a.summary)}</p>
@@ -99,8 +102,8 @@ route("customers", async () => {
   const rows = await api("GET", "/customers");
   shell("customers", `
     <div class="page-head"><div><h1>Customers</h1><p class="muted">Everyone who has called. Your receptionist remembers them and greets returning callers by name.</p></div>${exportBtn("customers")}</div>
-    <div class="panel">${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Phone</th><th>Calls</th><th>Bookings</th><th>Value</th><th>Last call</th><th></th></tr></thead><tbody>
-      ${rows.map((c) => `<tr class="click" data-href="#customer/${h(c.id)}"><td>${h(c.name || "Unknown")}</td><td>${h(c.phone)}</td><td>${c.calls}</td><td>${c.bookings}</td><td>${rupees(c.value)}</td><td>${fmtDate(c.lastCallAt)}</td><td>${c.doNotCall ? pill("Do not call", "bad") : ""}</td></tr>`).join("")}
+    <div class="panel">${rows.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Phone</th><th>Language</th><th>Calls</th><th>Bookings</th><th>Value</th><th>Last call</th><th></th></tr></thead><tbody>
+      ${rows.map((c) => `<tr class="click" data-href="#customer/${h(c.id)}"><td>${h(c.name || "Unknown")}</td><td>${h(c.phone)}</td><td>${c.preferredLanguage ? h(native(c.preferredLanguage)) : "—"}</td><td>${c.calls}</td><td>${c.bookings}</td><td>${rupees(c.value)}</td><td>${fmtDate(c.lastCallAt)}</td><td>${c.doNotCall ? pill("Do not call", "bad") : ""}</td></tr>`).join("")}
     </tbody></table></div>` : emptyState("Customers appear here after their first phone call.")}</div>`);
   bindRowLinks();
   bindExports();

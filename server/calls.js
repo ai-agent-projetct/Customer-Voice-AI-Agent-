@@ -4,9 +4,13 @@ import { greetingFor } from "./agent.js";
 import { analyzeCall } from "./analysis.js";
 import { campaignCallEnded } from "./campaigns.js";
 import { recordCall, upsertCustomer } from "./customers.js";
+import { agentLanguages } from "./languages.js";
 
 /**
- * extra: { channel: "phone"|"web"|"widget"|"simulation", direction?, callerNumber?, campaignId?, greeting? }
+ * extra: { channel: "phone"|"web"|"widget"|"simulation", direction?, callerNumber?,
+ *          campaignId?, greeting?, language? }
+ * The call's language is: an explicit choice, else the returning caller's
+ * preferred language, else the receptionist's main language.
  */
 export function startCall(db, agent, extra) {
   let customer = null;
@@ -14,7 +18,10 @@ export function startCall(db, agent, extra) {
     customer = upsertCustomer(db, agent.orgId, extra.callerNumber);
     if (customer) customer = recordCall(db, customer);
   }
-  const greeting = extra.greeting ?? greetingFor(agent, customer);
+  const spoken = agentLanguages(agent);
+  const language = [extra.language, customer?.preferredLanguage].find((c) => c && spoken.includes(c)) ?? agent.language;
+  const orgName = db.get("orgs", agent.orgId)?.name;
+  const greeting = extra.greeting ?? greetingFor(agent, customer, language, orgName);
   return db.insert("calls", {
     orgId: agent.orgId,
     agentId: agent.id,
@@ -27,6 +34,8 @@ export function startCall(db, agent, extra) {
     summary: "",
     durationSec: 0,
     ...extra,
+    language,
+    languageLog: [{ code: language, reason: "start", turn: 0, at: new Date().toISOString() }],
     greeting,
   });
 }
