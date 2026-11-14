@@ -4,8 +4,8 @@ import { normalizeServices } from "./catalog.js";
 import { customerContext } from "./customers.js";
 import { agentLanguages, detectLanguage, greetingIn, lang as langOf, phrase } from "./languages.js";
 import { Anthropic, EFFORT, MODEL, aiEnabled, createMessage } from "./llm.js";
-import { runTool, switchLanguage, toolDefinitions } from "./tools.js";
-import { todayIn } from "./util.js";
+import { freeSlots, runTool, switchLanguage, toolDefinitions } from "./tools.js";
+import { addDays, toMinutes, todayIn } from "./util.js";
 
 export { aiEnabled };
 
@@ -215,12 +215,141 @@ function demoTurn(db, agent, call, userText) {
   if (/\b(human|person|manager|owner|staff)\b/.test(text) && has("transfer_to_human")) {
     return { reply: "Sure, connecting you to a member of our team now.", action: { type: "transfer", reason: "Caller asked for a person" } };
   }
-  if (/\b(book|appointment|slot|reserve)\b/.test(text) && agent.bookingEnabled) {
-    return { reply: "I'd be happy to help you book. Demo mode can't check the calendar; add an Anthropic API key to turn on the real assistant." };
+  const booking = demoBooking(db, agent, call, userText, text);
+  if (booking) return booking;
+  const faq = (agent.faqs || []).find((f) => sharesKeyword(f.q, text));
+  if (faq) return { reply: faq.a };
+  const services = normalizeServices(agent.services);
+  if (/price|cost|how much|rate|charge|fee|kitna|कितना|विलை|விலை|எவ்வளவு/.test(text)) {
+    const named = services.find((sv) => text.includes(sv.name.toLowerCase()) && sv.price);
+    if (named) return { reply: `${named.name} is ${spokenRupees(named.price)}. Would you like to book it?` };
+    const priced = services.filter((sv) => sv.price).slice(0, 4);
+    if (priced.length) return { reply: `${priced.map((sv) => `${sv.name} is ${spokenRupees(sv.price)}`).join(", ")}. Would you like to book something?` };
+  }
+  if (/timing|open|close|hours|what time|समय|टाइम|நேரம்|திறந்த/.test(text)) {
+    const h = agent.hours;
+    return { reply: `We're open ${dayRange(h.days)}, from ${spokenTime(h.open)} to ${spokenTime(h.close)}. Would you like to book a visit?` };
   }
   if (text.includes("?")) {
     runTool(db, agent, call, "note_unanswered_question", { question: userText });
-    return { reply: `Demo mode: I've noted your question "${userText}" for the owner. Add an Anthropic API key for real answers.` };
+    return { reply: "I'm sorry, I don't have that information right now. I've noted your question for the owner, and they'll get back to you. Anything else I can help with?" };
   }
-  return { reply: `Demo mode: you said "${userText}". Add an Anthropic API key on the server to get real AI answers.` };
+  return { reply: `I can help with prices, timings and bookings${agent.bookingEnabled ? "" : " questions"}. What would you like to do?` };
+}
+
+// ---------- demo-mode helpers: a scripted receptionist that uses real business data ----------
+
+const STOP = new Set(["what", "when", "where", "which", "your", "have", "does", "with", "there", "this", "that", "from", "will", "about", "please", "could", "would", "there"]);
+function sharesKeyword(question, text) {
+  const words = (s) => s.toLowerCase().match(/[\p{L}]{4,}/gu)?.filter((w) => !STOP.has(w)) ?? [];
+  const asked = new Set(words(text));
+  return words(question).some((w) => asked.has(w));
+}
+
+function spokenRupees(n) {
+  return `${Number(n).toLocaleString("en-IN")} rupees`;
+}
+
+function spokenTime(hhmm) {
+  const [h, m] = hhmm.split(":").map(Number);
+  const hour = ((h + 11) % 12) + 1;
+  return `${hour}${m ? `:${String(m).padStart(2, "0")}` : ""} ${h < 12 ? "AM" : "PM"}`;
+}
+
+function dayRange(days) {
+  const names = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const sorted = [...days].sort();
+  const contiguous = sorted.every((d, i) => i === 0 || d === sorted[i - 1] + 1);
+  return contiguous && sorted.length > 2 ? `${names[sorted[0]]} to ${names[sorted.at(-1)]}` : sorted.map((d) => names[d]).join(", ");
+}
+
+function humanDate(date, today) {
+  if (date === today) return "today";
+  if (date === addDays(today, 1)) return "tomorrow";
+  return new Date(`${date}T12:00:00Z`).toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" });
+}
+
+/** Pulls service, day, time, name and phone out of what the caller said. */
+function readBookingDetails(agent, text, today) {
+  const found = {};
+  const service = normalizeServices(agent.services).find((sv) => text.includes(sv.name.toLowerCase()));
+  if (service) found.service = service.name;
+  if (/\b(today|aaj)\b|आज|இன்று/.test(text)) found.date = today;
+  if (/\b(tomorrow|kal)\b|कल|நாளை/.test(text)) found.date = addDays(today, 1);
+  const days = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+  const named = days.findIndex((d) => text.includes(d));
+  if (named >= 0) {
+    let d = addDays(today, 1);
+    while (new Date(`${d}T12:00:00Z`).getUTCDay() !== named) d = addDays(d, 1);
+    found.date = d;
+  }
+  const t = text.match(/\b(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm|baje|o'?clock)?\b/);
+  if (t && Number(t[1]) >= 1 && Number(t[1]) <= 12 && !/\d{5,}/.test(text.replace(/\s/g, ""))) {
+    let h = Number(t[1]);
+    if (t[3] === "pm" || (!t[3] || t[3] !== "am") && h <= 7) h = h === 12 ? 12 : h + 12;
+    if (t[3] === "am" && h === 12) h = 0;
+    found.time = `${String(h).padStart(2, "0")}:${t[2] || "00"}`;
+  } else if (/evening|shaam|शाम|மாலை/.test(text)) found.time = "17:00";
+  else if (/morning|subah|सुबह|காலை/.test(text)) found.time = "10:00";
+  const name = text.match(/(?:my name is|this is|i am|i'm|naam|name)\s+([a-z\u0900-\u0DFF]+)/i);
+  if (name && !["calling", "looking", "interested", "free"].includes(name[1])) found.name = name[1][0].toUpperCase() + name[1].slice(1);
+  const digits = text.replace(/[^\d]/g, "");
+  if (digits.length >= 10) found.phone = digits.slice(-10);
+  return found;
+}
+
+/** A small booking conversation: gathers details, offers free slots, confirms, books. */
+function demoBooking(db, agent, call, userText, text) {
+  if (!agent.bookingEnabled) return null;
+  const today = todayIn(agent.timeZone);
+  const state = (call.demo ??= {});
+  const starting = /book|appointment|slot|reserve|अपॉइंटमेंट|बुक|அப்பாயின்ட்மென்ட்|புக்/.test(text);
+  if (!state.booking && !starting) return null;
+  state.booking = true;
+  const customer = call.customerId ? db.get("customers", call.customerId) : null;
+  Object.assign(state, readBookingDetails(agent, text, today));
+  state.name ??= customer?.name || undefined;
+  state.phone ??= call.callerNumber || undefined;
+  const services = normalizeServices(agent.services);
+
+  if (state.confirming) {
+    if (/\b(yes|yeah|yep|ok|okay|sure|haan|ha|confirm)\b|हाँ|ठीक|சரி|ஆமா/.test(text)) {
+      const out = runTool(db, agent, call, "book_appointment", {
+        customer_name: state.name, phone: state.phone, date: state.date, time: state.time, service: state.service, notes: "",
+      });
+      const ref = out.result.match(/Reference (\w+)/)?.[1];
+      call.demo = {};
+      if (!ref) return { reply: `Sorry, that slot was just taken. ${out.result}` };
+      return { reply: `Done! Your ${state.service.toLowerCase()} is booked for ${humanDate(state.date, today)} at ${spokenTime(state.time)}. Your reference is ${ref.split("").join(" ")}. You'll get a confirmation message too. Anything else?` };
+    }
+    if (/\b(no|nahi|change)\b|नहीं|இல்லை/.test(text)) {
+      state.confirming = false;
+      state.time = undefined;
+      return { reply: "No problem. Which time would suit you better?" };
+    }
+  }
+  if (!state.service && services.length) {
+    state.service = services.length === 1 ? services[0].name : undefined;
+    if (!state.service) return { reply: `Sure! Which service would you like: ${services.slice(0, 4).map((sv) => sv.name).join(", ")}?` };
+  }
+  if (!state.date) return { reply: `Which day would you like to come in for the ${state.service}?` };
+  const free = freeSlots(db, agent, state.date);
+  const day = humanDate(state.date, today);
+  if (!free.length) {
+    state.date = undefined;
+    return { reply: `Sorry, we're closed or fully booked ${day}. Would another day work?` };
+  }
+  if (!state.time || !free.includes(state.time)) {
+    const near = state.time ? free.filter((t) => Math.abs(toMinutes(t) - toMinutes(state.time)) <= 120).slice(0, 3) : [];
+    const options = (near.length ? near : free.slice(0, 3)).map(spokenTime).join(", ");
+    const reply = state.time
+      ? `${spokenTime(state.time)} isn't free ${day}, but ${options} ${near.length === 1 ? "is" : "are"} available. Which works for you?`
+      : `For ${day} I have ${options} free. Which time works for you?`;
+    state.time = undefined;
+    return { reply };
+  }
+  if (!state.name) return { reply: "May I have your name, please?" };
+  if (!state.phone) return { reply: `Thanks, ${state.name}. And your 10-digit phone number?` };
+  state.confirming = true;
+  return { reply: `Let me confirm: ${state.service.toLowerCase()}, ${humanDate(state.date, today)} at ${spokenTime(state.time)}, for ${state.name}${call.callerNumber ? " on this number" : `, phone ${state.phone.split("").join(" ")}`}. Shall I book it?` };
 }

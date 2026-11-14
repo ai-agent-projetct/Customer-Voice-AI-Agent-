@@ -23,6 +23,22 @@ such as Hinglish.
 | **Growth** | **Outbound campaigns** (win-back, reminders) with consent records, a 9am–9pm calling window, do-not-call and AI disclosure enforced in code · **website voice/chat widget** |
 | **Business** | Plans with minute and receptionist limits · a polite hand-off to a person when minutes run out · **platform admin console** · rate limiting · Twilio signature checks |
 
+## See a demo
+
+```bash
+npm install
+npm run demo
+```
+
+This loads **Glow Salon (Demo)**: two weeks of calls in English, Hindi and Tamil, bookings,
+leads, customers, questions to teach, a live call and a finished campaign. Then it starts the
+server. Open <http://localhost:3000/app> and log in as `demo@voicedesk.in` / `demo1234`.
+Each run starts from fresh demo data.
+
+Without an AI key, the receptionist follows a script built from the business's own details:
+it answers prices, timings and taught FAQs, and books real free slots. With
+`ANTHROPIC_API_KEY` set, the conversations are real AI.
+
 ## Run it on your computer
 
 You need [Node.js](https://nodejs.org) 20 or newer.
@@ -82,6 +98,7 @@ public/
   index.html          marketing website
   app.html, js/       dashboard (plain ES modules, no build step)
   widget.js           embeddable "Talk to us" widget
+scripts/demo.js       demo business with sample data (npm run demo)
 test/                 automated tests
 docs/                 STRATEGY.md, LEARN.md
 ```

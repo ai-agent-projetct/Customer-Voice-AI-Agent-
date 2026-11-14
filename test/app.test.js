@@ -2,7 +2,7 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { Store } from "../server/db.js";
 import { createApp } from "../server/index.js";
-import { twilioSignature } from "../server/routes/twilio.js";
+import { escapeXml, twilioSignature } from "../server/routes/twilio.js";
 import { runTool, todayIn } from "../server/tools.js";
 
 delete process.env.ANTHROPIC_API_KEY; // always demo mode in tests
@@ -65,7 +65,7 @@ test("browser test call runs a conversation and logs the transcript", async () =
   const start = await api("POST", `/api/agents/${agent.id}/test`);
   assert.equal(start.body.greeting, agent.greeting);
   const turn = await api("POST", `/api/calls/${start.body.callId}/say`, { text: "Do you do facials?" });
-  assert.match(turn.body.reply, /Demo mode/);
+  assert.match(turn.body.reply, /noted your question/);
   const bye = await api("POST", `/api/calls/${start.body.callId}/say`, { text: "ok thanks bye" });
   assert.equal(bye.body.action.type, "hangup");
   const log = await api("GET", `/api/calls/${start.body.callId}`);
@@ -84,7 +84,8 @@ test("phone call webhooks speak, listen and hang up", async () => {
   const callId = first.match(/gather\/([\w-]+)/)[1];
 
   assert.match(await twilio(`/twilio/gather/${callId}`, { SpeechResult: "" }), /didn&apos;t catch that/);
-  assert.match(await twilio(`/twilio/gather/${callId}`, { SpeechResult: "what are your prices & timings?" }), /&amp;/);
+  assert.match(await twilio(`/twilio/gather/${callId}`, { SpeechResult: "what are your prices & timings?" }), /450 rupees/);
+  assert.equal(escapeXml(`Tom & Jerry's <salon>`), "Tom &amp; Jerry&apos;s &lt;salon&gt;");
   assert.match(await twilio(`/twilio/gather/${callId}`, { SpeechResult: "thank you, bye" }), /<Hangup\/>/);
 
   await twilio("/twilio/status", { CallSid: "CA1", CallStatus: "completed", CallDuration: "42" });

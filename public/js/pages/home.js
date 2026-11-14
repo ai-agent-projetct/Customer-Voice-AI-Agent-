@@ -90,7 +90,7 @@ route("overview", async () => {
   shell("overview", `
     <div class="page-head"><div><h1>Hello, ${h(state.user.name.split(" ")[0])}</h1><p class="muted">What your AI receptionist did in the last 30 days.</p></div>
       <a class="btn btn-primary" href="#agents">Receptionists</a></div>
-    ${state.catalog.aiEnabled ? "" : `<div class="banner"><b>Demo mode.</b> The server has no Anthropic API key, so replies are placeholders. Everything else works. Add <code>ANTHROPIC_API_KEY</code> to turn on real AI (see docs/LEARN.md).</div>`}
+    ${state.catalog.aiEnabled ? "" : `<div class="banner"><b>Demo mode.</b> There's no AI key on the server, so the receptionist follows a script built from your business details (prices, timings, FAQs, bookings). Add <code>ANTHROPIC_API_KEY</code> for real AI conversations (see docs/LEARN.md).</div>`}
     ${u.overLimit ? `<div class="banner bad"><b>Your plan's minutes are used up.</b> Calls are being passed to your phone. <a href="#settings">Upgrade</a></div>` : ""}
     <div class="stats">
       <div class="stat hero"><span>Estimated revenue from bookings</span><b>${rupees(ins.estimatedRevenue)}</b><small>${ins.bookings} bookings × your service prices</small></div>

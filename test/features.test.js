@@ -261,7 +261,7 @@ test("website widget: public chat with secrets, CORS and rate limits", async () 
   assert.equal(s.headers.get("access-control-allow-origin"), "*");
   assert.equal((await api(null, "POST", `/public/sessions/${s.body.sessionId}/say`, { secret: "wrong", text: "hi" })).status, 404);
   const reply = await api(null, "POST", `/public/sessions/${s.body.sessionId}/say`, { secret: s.body.secret, text: "What are your timings" });
-  assert.match(reply.body.reply, /Demo mode/);
+  assert.match(reply.body.reply, /open Monday to Saturday/);
   assert.equal(db.get("calls", s.body.sessionId).channel, "widget");
   assert.equal(db.get("calls", s.body.sessionId).widgetSecretHash.length, 64);
   const asOwner = (await api(token, "GET", `/calls/${s.body.sessionId}`)).body;
@@ -328,4 +328,32 @@ test("bookings made in browser tests never message real numbers or count as reve
   assert.equal(db.find("messages", (m) => m.to === "+919000011111" && m.status !== "test").length, 0);
   assert.equal((await api(token, "GET", "/insights")).body.estimatedRevenue, 0);
   assert.equal((await api(token, "GET", "/appointments")).body.length, 1); // still visible to the owner
+});
+
+test("demo mode answers prices, timings and FAQs, and books a real slot", async () => {
+  const { token, agent } = await business("demobook@x.in");
+  await api(token, "PUT", `/agents/${agent.id}`, { faqs: [{ q: "Do you have parking?", a: "Yes, free parking behind the salon." }] });
+  const { callId } = (await api(token, "POST", `/agents/${agent.id}/test`)).body;
+  const say = async (text) => (await api(token, "POST", `/calls/${callId}/say`, { text })).body.reply;
+  assert.match(await say("How much is a facial?"), /Facial is 800 rupees/);
+  assert.match(await say("Is there parking?"), /free parking behind the salon/);
+  const day = nextOpenDay();
+  const weekday = new Date(`${day}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" }).toLowerCase();
+  assert.match(await say(`I'd like to book a haircut on ${weekday} at 11am`), /name/);
+  assert.match(await say("My name is Rahul"), /phone number/);
+  assert.match(await say("98765 43210"), /Shall I book it\?/);
+  assert.match(await say("yes"), /booked for .* at 11 AM\. Your reference is/);
+  const [appt] = (await api(token, "GET", "/appointments")).body;
+  assert.deepEqual([appt.customerName, appt.date, appt.time, appt.service], ["Rahul", day, "11:00", "Haircut"]);
+});
+
+test("the demo seed builds a believable business", async () => {
+  const { seedDemo } = await import("../scripts/demo.js");
+  const { insights } = await import("../server/insights.js");
+  const { db: demo, org } = seedDemo(null);
+  const ins = insights(demo, org);
+  assert.ok(ins.calls > 20 && ins.bookings > 5 && ins.estimatedRevenue > 0, JSON.stringify(ins));
+  assert.ok(ins.languages["hi-IN"] && ins.languages["ta-IN"] && ins.languages["en-IN"]);
+  assert.equal(demo.find("calls", (c) => c.status === "live").length, 1);
+  assert.equal(demo.find("questions", (q) => q.status === "open").length, 3);
 });
