@@ -67,6 +67,7 @@ export async function dialCampaigns(db, now = new Date()) {
     for (const contact of campaign.contacts) {
       if (slots <= 0) break;
       if (contact.status !== "pending") continue;
+      if (contact.retryAt && contact.retryAt > now.toISOString()) continue; // waiting before the next attempt
       const customer = findCustomer(db, org.id, contact.phone);
       if (customer?.doNotCall) {
         contact.status = "skipped";
@@ -85,6 +86,7 @@ export async function dialCampaigns(db, now = new Date()) {
       });
       contact.status = "calling";
       contact.callId = call.id;
+      contact.attempts = (contact.attempts || 0) + 1;
       slots--;
       const placed = await dialer.call({
         to: contact.phone,
@@ -96,6 +98,7 @@ export async function dialCampaigns(db, now = new Date()) {
       } else {
         contact.status = "pending"; // try again once calling works
         contact.callId = null;
+        contact.attempts -= 1;
         db.remove("calls", call.id);
         db.update("campaigns", campaign.id, { status: "paused", lastError: placed.error, contacts: campaign.contacts });
         break;
@@ -111,8 +114,17 @@ export function campaignCallEnded(db, call, outcome) {
   if (!campaign) return;
   const contact = campaign.contacts.find((c) => c.callId === call.id);
   if (contact) {
-    contact.status = ["completed", "transferred", "caller-hung-up"].includes(outcome) ? "done" : "failed";
-    contact.result = outcome;
+    const reached = ["completed", "transferred", "caller-hung-up"].includes(outcome);
+    const maxAttempts = campaign.maxAttempts || 1;
+    if (!reached && (contact.attempts || 1) < maxAttempts) {
+      // Busy or no answer: try again later instead of giving up.
+      contact.status = "pending";
+      contact.retryAt = new Date(Date.now() + (campaign.retryMinutes || 60) * 60e3).toISOString();
+      contact.result = `${outcome}: retry ${contact.attempts || 1} of ${maxAttempts - 1}`;
+    } else {
+      contact.status = reached ? "done" : "failed";
+      contact.result = outcome;
+    }
   }
   finishIfDone(db, campaign);
 }

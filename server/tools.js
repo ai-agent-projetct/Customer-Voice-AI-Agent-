@@ -6,6 +6,7 @@ import { DEFAULT_HOURS, normalizeServices } from "./catalog.js";
 import { findCustomer, upsertCustomer } from "./customers.js";
 import { agentLanguages, lang } from "./languages.js";
 import { notifyOwner, queueMessage } from "./messaging.js";
+import { emitEvent } from "./webhooks.js";
 import { localParts, samePhone, toHHMM, toMinutes, todayIn } from "./util.js";
 
 export { todayIn };
@@ -106,8 +107,28 @@ export function toolDefinitions(agent, org, call) {
   if (call?.callerNumber) {
     tools.push(tool("do_not_call", "The caller asked never to be called again. Respect it immediately.", { reason: str() }));
   }
-  if (agent.transferNumber || org?.ownerPhone) {
+  const departments = (agent.departments || []).filter((d) => d.name && d.number);
+  if (departments.length) {
+    tools.push(tool("transfer_to_human", "Transfer the call to the right team when the caller asks for it, insists on a person, or you cannot help.", {
+      department: { type: "string", enum: [...departments.map((d) => d.name), "General"], description: "Which team should take the call" },
+      reason: str(),
+    }));
+  } else if (agent.transferNumber || org?.ownerPhone) {
     tools.push(tool("transfer_to_human", "Transfer the call to a staff member when the caller insists on a person or you cannot help.", { reason: str() }));
+  }
+  if (call?.channel !== "simulation") {
+    tools.push(tool("schedule_callback", "The caller asked to be called back later. Schedule the call for the time they want (calls are only made between 9am and 9pm).", {
+      phone: str(), date: str("YYYY-MM-DD"), time: str("HH:MM, 24-hour"), reason: str("What the callback is about"),
+    }));
+  }
+  if (agent.ordersEnabled) {
+    tools.push(tool("place_order", "Place the caller's order after reading it back and getting a yes. Only items from the services and prices list can be ordered.", {
+      customer_name: str(), phone: str(),
+      items: { type: "array", items: { type: "object", properties: { name: str("Exact item name"), quantity: { type: "integer" } }, required: ["name", "quantity"], additionalProperties: false } },
+      fulfilment: { type: "string", enum: ["pickup", "delivery"] },
+      address: str("Delivery address, or empty for pickup"),
+      notes: str(),
+    }));
   }
   tools.push(tool("end_call", "Hang up after you have said goodbye and the caller has nothing else they need.", { summary: str("One-sentence summary of the call") }));
   return tools;
@@ -178,6 +199,7 @@ export function runTool(db, agent, call, name, input) {
         source: call.channel,
       });
       rememberCaller(db, agent, call, input.phone, input.customer_name);
+      emitEvent(db, agent.orgId, "appointment.booked", appt);
       const msg = sendConfirmation(appt, "confirmed");
       return { result: `Booked. Reference ${appt.ref}.${msg ? " A confirmation message is being sent." : ""}` };
     }
@@ -197,13 +219,14 @@ export function runTool(db, agent, call, name, input) {
         return { result: "Booking not found for this caller. Use find_appointments first." };
       }
       if (name === "cancel_appointment") {
-        db.update("appointments", appt.id, { status: "cancelled" });
+        emitEvent(db, agent.orgId, "appointment.changed", db.update("appointments", appt.id, { status: "cancelled" }));
         sendConfirmation(appt, "cancelled");
         return { result: `Cancelled booking ${appt.ref}.` };
       }
       const problem = slotProblem(db, agent, input.date, input.time, appt.id);
       if (problem) return { result: problem };
       const moved = db.update("appointments", appt.id, { date: input.date, time: input.time, reminded: false });
+      emitEvent(db, agent.orgId, "appointment.changed", moved);
       sendConfirmation(moved, "moved");
       return { result: `Moved booking ${appt.ref} to ${input.date} ${input.time}.` };
     }
@@ -221,6 +244,7 @@ export function runTool(db, agent, call, name, input) {
         source: call.channel,
       });
       rememberCaller(db, agent, call, input.phone, input.customer_name);
+      emitEvent(db, agent.orgId, "lead.created", db.find("leads", (l) => l.callId === call.id).at(-1));
       return { result: "Saved. The team will follow up." };
     }
     case "note_unanswered_question": {
@@ -253,8 +277,47 @@ export function runTool(db, agent, call, name, input) {
       switchLanguage(db, agent, call, input.language, "tool");
       return { result: `Switched. The caller now hears the ${lang(input.language).name} voice: reply only in ${lang(input.language).name}.` };
     }
-    case "transfer_to_human":
-      return { result: "Transferring now. Tell the caller you are connecting them.", action: { type: "transfer", reason: input.reason } };
+    case "transfer_to_human": {
+      const dept = (agent.departments || []).find((d) => d.name === input.department && d.number);
+      return {
+        result: `Transferring now${dept ? ` to ${dept.name}` : ""}. Tell the caller you are connecting them.`,
+        action: { type: "transfer", reason: input.reason, department: dept?.name, number: dept?.number },
+      };
+    }
+    case "schedule_callback": {
+      if (!DATE_RE.test(input.date) || !TIME_RE.test(input.time)) return { result: "Error: date must be YYYY-MM-DD and time HH:MM." };
+      const now = localParts(agent.timeZone);
+      if (input.date < now.date || (input.date === now.date && input.time <= now.time)) return { result: "That time has already passed. Ask for a later time." };
+      if (input.time < "09:00" || input.time >= "21:00") return { result: "Callbacks can only be made between 9am and 9pm. Ask for a time in that window." };
+      const phone = call.callerNumber || input.phone;
+      if (findCustomer(db, agent.orgId, phone)?.doNotCall) return { result: "This number is on the do-not-call list, so no callback can be scheduled." };
+      db.insert("callbacks", { orgId: agent.orgId, agentId: agent.id, callId: call.id, phone, date: input.date, time: input.time, reason: input.reason, language: call.language ?? agent.language, status: "pending", source: call.channel });
+      emitEvent(db, agent.orgId, "callback.scheduled", { phone, date: input.date, time: input.time, reason: input.reason });
+      return { result: `Callback scheduled for ${input.date} at ${input.time}. Confirm the time with the caller.` };
+    }
+    case "place_order": {
+      const menu = normalizeServices(agent.services);
+      const lines = [];
+      for (const item of input.items || []) {
+        const match = menu.find((m) => m.name.toLowerCase() === String(item.name).toLowerCase());
+        if (!match) return { result: `"${item.name}" is not on the list. Available: ${menu.map((m) => m.name).join(", ")}.` };
+        if (!Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > 100) return { result: "Quantity must be between 1 and 100." };
+        lines.push({ name: match.name, quantity: item.quantity, price: match.price });
+      }
+      if (!lines.length) return { result: "The order has no items." };
+      if (input.fulfilment === "delivery" && !String(input.address || "").trim()) return { result: "Ask for the delivery address first." };
+      const total = lines.reduce((sum, l) => sum + l.price * l.quantity, 0);
+      const order = db.insert("orders", {
+        orgId: agent.orgId, agentId: agent.id, callId: call.id, ref: crypto.randomBytes(3).toString("hex").toUpperCase(),
+        customerName: input.customer_name, phone: input.phone, items: lines, total, fulfilment: input.fulfilment,
+        address: input.address, notes: input.notes, status: "new", source: call.channel,
+      });
+      rememberCaller(db, agent, call, input.phone, input.customer_name);
+      notifyOwner(db, agent.orgId, { kind: "order", title: `New order ${order.ref}: ₹${total}`, body: `${lines.map((l) => `${l.quantity} × ${l.name}`).join(", ")} for ${input.customer_name} (${input.fulfilment})`, callId: call.id });
+      queueMessage(db, { orgId: agent.orgId, to: input.phone, kind: "order_confirmed", call, body: `${org?.name ?? agent.name}: order ${order.ref} confirmed. ${lines.map((l) => `${l.quantity} × ${l.name}`).join(", ")}. Total ₹${total}.` });
+      emitEvent(db, agent.orgId, "order.placed", order);
+      return { result: `Order placed. Reference ${order.ref}. Total ${total} rupees.` };
+    }
     case "end_call":
       return { result: "Call will end after your goodbye.", action: { type: "hangup", summary: input.summary } };
     default:

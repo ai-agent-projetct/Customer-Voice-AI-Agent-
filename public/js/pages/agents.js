@@ -111,6 +111,21 @@ route("agent", async (id) => {
           <label>Transfer calls to <span class="hint">— staff mobile for "speak to a person" (otherwise your number from Settings)</span><input name="transferNumber" value="${h(a.transferNumber)}" placeholder="+91…"></label>
           <p class="muted small">See <a href="#settings">Settings → Phone setup</a> for connecting a number.</p>
           <hr>
+          <div class="row">
+            <label>Conversation speed<select name="voiceMode"><option value="standard">Standard (speak, then listen)</option><option value="realtime" ${a.voiceMode === "realtime" ? "selected" : ""}>Real-time (instant replies, callers can interrupt)</option></select></label>
+            <label>WhatsApp number <span class="hint">(if different from the phone number)</span><input name="whatsappNumber" value="${h(a.whatsappNumber || "")}" placeholder="+91…"></label>
+          </div>
+          <p class="muted small">Real-time needs Twilio ConversationRelay enabled on your Twilio account and a public server address; otherwise calls use Standard.</p>
+          <label class="check"><input type="checkbox" name="whatsappEnabled" ${a.whatsappEnabled ? "checked" : ""}> Answer WhatsApp messages with this receptionist</label>
+          <label class="check"><input type="checkbox" name="recordCalls" ${a.recordCalls ? "checked" : ""}> Record calls <span class="hint">— tell callers in your greeting that calls are recorded</span></label>
+          <label class="check"><input type="checkbox" name="ordersEnabled" ${a.ordersEnabled ? "checked" : ""}> Take orders by phone for the items in Services & hours</label>
+          <div class="label" style="margin-top:14px">Teams to transfer to <span class="hint">— "Billing", "Bridal desk"… the receptionist picks the right one</span></div>
+          <div id="departments"></div>
+          <button type="button" class="btn small" id="add-dept">+ Add team</button>
+          <div class="label" style="margin-top:14px">Details to capture from every call <span class="hint">— e.g. "Budget", "Preferred area". Shown on each call and sent to your CRM.</span></div>
+          <div id="fields"></div>
+          <button type="button" class="btn small" id="add-field">+ Add detail</button>
+          <hr>
           <label class="check"><input type="checkbox" name="widgetEnabled" ${a.widgetEnabled ? "checked" : ""}> Show a "Talk to us" voice & chat button on my website</label>
           <div id="embed" class="${a.widgetEnabled ? "" : "hidden"}">
             <p class="muted small">Paste this line just before <code>&lt;/body&gt;</code> on your website:</p>
@@ -210,6 +225,14 @@ route("agent", async (id) => {
   const addFaq = (f = { q: "", a: "" }) => faqBox.insertAdjacentHTML("beforeend", `<div class="pair"><input data-q placeholder="Question" value="${h(f.q)}"><textarea data-a placeholder="Answer" style="min-height:44px">${h(f.a)}</textarea><button type="button" class="x" aria-label="Remove">×</button></div>`);
   const svcBox = document.getElementById("services");
   const addSvc = (s = { name: "", price: 0 }) => svcBox.insertAdjacentHTML("beforeend", `<div class="pair svc"><input data-name placeholder="Service" value="${h(s.name)}"><input data-price type="number" min="0" placeholder="₹ price" value="${s.price || ""}"><button type="button" class="x" aria-label="Remove">×</button></div>`);
+  const deptBox = document.getElementById("departments");
+  const addDept = (d = { name: "", number: "" }) => deptBox.insertAdjacentHTML("beforeend", `<div class="pair svc"><input data-dname placeholder="Team name" value="${h(d.name)}"><input data-dnumber placeholder="+91…" value="${h(d.number)}"><button type="button" class="x" aria-label="Remove">×</button></div>`);
+  const fieldBox = document.getElementById("fields");
+  const addField = (f = { name: "", description: "" }) => fieldBox.insertAdjacentHTML("beforeend", `<div class="pair"><input data-fname placeholder="Detail, e.g. Budget" value="${h(f.name)}"><input data-fdesc placeholder="What to look for (optional)" value="${h(f.description || "")}"><button type="button" class="x" aria-label="Remove">×</button></div>`);
+  (a.departments || []).forEach(addDept);
+  (a.extractFields || []).forEach(addField);
+  document.getElementById("add-dept").onclick = () => addDept();
+  document.getElementById("add-field").onclick = () => addField();
   (a.faqs || []).forEach(addFaq);
   a.services.forEach(addSvc);
   form.onclick = (e) => { if (e.target.classList.contains("x")) e.target.parentElement.remove(); };
@@ -263,6 +286,13 @@ route("agent", async (id) => {
     phoneNumber: form.phoneNumber.value.trim(),
     transferNumber: form.transferNumber.value.trim(),
     widgetEnabled: form.widgetEnabled.checked,
+    voiceMode: form.voiceMode.value,
+    whatsappEnabled: form.whatsappEnabled.checked,
+    whatsappNumber: form.whatsappNumber.value.trim(),
+    recordCalls: form.recordCalls.checked,
+    ordersEnabled: form.ordersEnabled.checked,
+    departments: [...deptBox.querySelectorAll(".pair")].map((p) => ({ name: p.querySelector("[data-dname]").value, number: p.querySelector("[data-dnumber]").value })),
+    extractFields: [...fieldBox.querySelectorAll(".pair")].map((p) => ({ name: p.querySelector("[data-fname]").value, description: p.querySelector("[data-fdesc]").value })),
   });
   const save = async () => {
     document.getElementById("err").textContent = "";

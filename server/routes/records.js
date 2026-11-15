@@ -4,6 +4,7 @@ import express from "express";
 import { respond } from "../agent.js";
 import { endCall } from "../calls.js";
 import { eraseCustomer } from "../customers.js";
+import { bridgeCall } from "../outbound.js";
 import { csv, samePhone } from "../util.js";
 import { owned, wrap } from "./helpers.js";
 
@@ -25,18 +26,18 @@ export function recordsRouter(db, auth) {
   const mine = (table, req, extra = () => true) => db.find(table, (x) => x.orgId === req.org.id && extra(x));
 
   // ---- Calls ----
-  const callSummary = ({ messages, transcript, system, widgetSecretHash, ...c }) => ({ ...c, turns: transcript.length, lastLine: transcript.at(-1)?.text ?? "" });
+  const callSummary = ({ messages, transcript, system, widgetSecretHash, relayToken, ...c }) => ({ ...c, turns: transcript.length, lastLine: transcript.at(-1)?.text ?? "" });
 
   r.get("/calls", (req, res) => {
     const live = req.query.status === "live";
     const rows = mine("calls", req, (c) => c.channel !== "simulation" && (!live || c.status === "live")).reverse();
-    res.json(live ? rows.map(({ messages, system, widgetSecretHash, ...c }) => c) : rows.map(callSummary));
+    res.json(live ? rows.map(({ messages, system, widgetSecretHash, relayToken, ...c }) => c) : rows.map(callSummary));
   });
 
   r.get("/calls/:id", (req, res) => {
     const call = owned(db, "calls", req, res, "Call not found.");
     if (!call) return;
-    const { messages, system, widgetSecretHash, ...rest } = call;
+    const { messages, system, widgetSecretHash, relayToken, ...rest } = call;
     res.json({
       ...rest,
       appointments: db.find("appointments", (a) => a.callId === call.id),
@@ -91,6 +92,49 @@ export function recordsRouter(db, auth) {
       res.json(db.update(table, row.id, { status }));
     });
   }
+
+  // ---- Orders ----
+  r.get("/orders", (req, res) => res.json(mine("orders", req, (x) => x.source !== "simulation").reverse()));
+  r.patch("/orders/:id", (req, res) => {
+    const row = owned(db, "orders", req, res);
+    if (!row) return;
+    const allowed = ["new", "preparing", "ready", "completed", "cancelled"];
+    if (!allowed.includes(req.body?.status)) return res.status(400).json({ error: `Status must be one of ${allowed.join(", ")}.` });
+    res.json(db.update("orders", row.id, { status: req.body.status }));
+  });
+
+  // ---- Scheduled callbacks and other queued AI calls ----
+  r.get("/callbacks", (req, res) => res.json(mine("callbacks", req).reverse().slice(0, 200)));
+  r.delete("/callbacks/:id", (req, res) => {
+    const row = owned(db, "callbacks", req, res);
+    if (!row) return;
+    if (row.status !== "pending") return res.status(400).json({ error: "Only waiting calls can be cancelled." });
+    res.json(db.update("callbacks", row.id, { status: "cancelled" }));
+  });
+
+  // ---- Click-to-call: rings the owner's phone, then connects the customer ----
+  r.post("/click-to-call", wrap(async (req, res) => {
+    const to = String(req.body?.phone || "");
+    if (to.replace(/\D/g, "").length < 10) return res.status(400).json({ error: "Enter the customer's phone number." });
+    const out = await bridgeCall(db, req.org, { to, customerName: String(req.body?.name || "").slice(0, 80) });
+    if (!out.ok) return res.status(400).json({ error: out.error });
+    res.status(202).json(out);
+  }));
+
+  // ---- Quality: every call is scored ----
+  r.get("/quality", (req, res) => {
+    const scored = mine("calls", req, (c) => c.analysis?.quality && c.channel !== "simulation");
+    const avg = (key) => (scored.length ? Math.round((scored.reduce((s, c) => s + (c.analysis.quality[key] || 0), 0) / scored.length) * 10) / 10 : 0);
+    const issues = {};
+    scored.forEach((c) => (c.analysis.quality.issues || []).forEach((i) => (issues[i] = (issues[i] || 0) + 1)));
+    res.json({
+      calls: scored.length,
+      score: Math.round(avg("score")),
+      accuracy: avg("accuracy"), helpfulness: avg("helpfulness"), empathy: avg("empathy"), resolution: avg("resolution"),
+      topIssues: Object.entries(issues).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([issue, count]) => ({ issue, count })),
+      lowest: scored.sort((a, b) => a.analysis.quality.score - b.analysis.quality.score).slice(0, 8).map(callSummary),
+    });
+  });
 
   // ---- Customers (caller memory) ----
   r.get("/customers", (req, res) => {

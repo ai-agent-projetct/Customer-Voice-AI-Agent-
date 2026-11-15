@@ -3,6 +3,7 @@
 import { greetingFor } from "./agent.js";
 import { analyzeCall } from "./analysis.js";
 import { campaignCallEnded } from "./campaigns.js";
+import { outboundCallEnded } from "./outbound.js";
 import { recordCall, upsertCustomer } from "./customers.js";
 import { agentLanguages } from "./languages.js";
 
@@ -56,6 +57,8 @@ export function endCall(db, call, outcome, durationSec) {
     durationSec: durationSec ?? Math.round((Date.now() - started) / 1000),
   });
   if (ended.campaignId) campaignCallEnded(db, ended, outcome);
+  if (ended.callbackId) outboundCallEnded(db, ended, outcome);
+  if (ended.channel === "bridge") return null; // a person-to-person call: nothing to analyse
   if (ended.channel === "simulation") return null;
   return analyzeCall(db, ended).catch((err) => console.error("analysis error", err));
 }

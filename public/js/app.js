@@ -5,6 +5,7 @@ import "./pages/home.js";
 import "./pages/agents.js";
 import "./pages/records.js";
 import "./pages/manage.js";
+import "./pages/platform.js";
 
 window.addEventListener("hashchange", router);
 router();

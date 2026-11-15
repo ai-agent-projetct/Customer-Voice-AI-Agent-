@@ -20,13 +20,17 @@ export { Anthropic };
 
 // A Messages API request with refusal fallbacks on: if the model declines,
 // the API retries the same request on a fallback model inside the same call.
-export function createMessage(params) {
-  return getClient().beta.messages.create({
+// With `onText`, the reply is streamed: onText gets each piece of text as it
+// is written, so a phone call can start speaking before the reply is finished.
+export function createMessage(params, onText) {
+  const body = {
     model: MODEL,
     betas: ["server-side-fallback-2026-07-01"],
     fallbacks: "default",
     ...params,
-  });
+  };
+  if (!onText) return getClient().beta.messages.create(body);
+  return getClient().beta.messages.stream(body).on("text", (delta) => onText(delta)).finalMessage();
 }
 
 /**

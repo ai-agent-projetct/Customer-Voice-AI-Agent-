@@ -2,7 +2,7 @@
 // customers and the message outbox.
 import { api, bindRowLinks, download, emptyState, fmtDate, fmtDuration, h, pill, refreshBadges, route, rupees, shell, state, toast, tone } from "../core.js";
 
-const CHANNEL = { phone: "Phone", web: "Test", widget: "Website" };
+const CHANNEL = { phone: "Phone", web: "Test", widget: "Website", whatsapp: "WhatsApp", bridge: "Click-to-call" };
 const SWITCH = { menu: "chosen in menu", tool: "asked to switch", detected: "detected from speech" };
 const native = (code) => state.catalog.languages.find((l) => l.code === code)?.native ?? code;
 
@@ -45,6 +45,12 @@ route("call", async (id) => {
       <div class="chips">${pill(`Intent: ${a.intent.replace(/_/g, " ")}`, "grey")} ${pill(`Mood: ${a.sentiment}`, tone(a.sentiment))} ${a.leadScore !== "none" ? pill(`Lead: ${a.leadScore}`, tone(a.leadScore)) : ""} ${pill(a.language, "grey")}</div>
       ${a.followUpNeeded && a.followUpNote ? `<p class="follow">👉 ${h(a.followUpNote)}</p>` : ""}
     </div>` : c.status === "ended" ? `<div class="banner">Analysis is being prepared…</div>` : ""}
+    ${a?.quality ? `<div class="panel"><h2>Quality score: ${a.quality.score}/100</h2>
+      <div class="chips">${["accuracy", "helpfulness", "empathy", "resolution"].map((k) => pill(`${k} ${a.quality[k]}/5`, a.quality[k] >= 4 ? "" : a.quality[k] >= 3 ? "warm" : "bad")).join(" ")}</div>
+      ${a.quality.issues?.length ? `<ul>${a.quality.issues.map((i) => `<li>${h(i)}</li>`).join("")}</ul>` : ""}
+      ${Object.keys(a.extracted || {}).length ? `<p><b>Captured details:</b> ${Object.entries(a.extracted).map(([k, v]) => `${h(k)}: ${h(v)}`).join(" · ")}</p>` : ""}
+    </div>` : ""}
+    ${c.recordingUrl ? `<div class="banner">🎙 <a href="${h(c.recordingUrl)}" target="_blank" rel="noopener">Listen to the recording</a> (${fmtDuration(c.recordingSec)})</div>` : ""}
     ${c.appointments.length ? `<div class="banner ok">📅 Booked: ${c.appointments.map((x) => `${h(x.service)} on ${h(x.date)} at ${h(x.time)} (${h(x.status)})`).join("; ")}</div>` : ""}
     <div class="panel transcript">${c.transcript.map((t) => `<div class="line ${t.role}"><span class="who">${t.role === "agent" ? "Receptionist" : "Caller"}</span><span>${h(t.text)}</span></div>`).join("")}</div>`);
 });
@@ -119,7 +125,7 @@ route("customer", async (id) => {
         <label>Name<input name="name" value="${h(c.name)}"></label>
         <label>Notes <span class="hint">— your receptionist sees these on their next call</span><textarea name="notes">${h(c.notes)}</textarea></label>
         <label class="check"><input type="checkbox" name="doNotCall" ${c.doNotCall ? "checked" : ""}> Do not call (excluded from all campaigns)</label>
-        <div class="save-bar"><button class="btn btn-primary">Save</button><button type="button" class="btn btn-danger" id="erase">Erase all data</button></div>
+        <div class="save-bar"><button class="btn btn-primary">Save</button><button type="button" class="btn" id="c2c">📞 Call them</button><button type="button" class="btn btn-danger" id="erase">Erase all data</button></div>
       </form>
       <div class="panel"><h2>Bookings</h2>${c.appointments.length ? `<ul class="taught">${c.appointments.map((a) => `<li><b>${h(a.service)}</b> · ${h(a.date)} ${h(a.time)} ${pill(a.status, a.status === "confirmed" ? "" : "grey")}</li>`).join("")}</ul>` : `<p class="muted">No bookings yet.</p>`}</div>
     </div>
@@ -130,6 +136,12 @@ route("customer", async (id) => {
     e.preventDefault();
     await api("PATCH", `/customers/${c.id}`, { name: form.name.value, notes: form.notes.value, doNotCall: form.doNotCall.checked });
     toast("Saved");
+  };
+  document.getElementById("c2c").onclick = async () => {
+    try {
+      await api("POST", "/click-to-call", { phone: c.phone, name: c.name });
+      toast("Your phone will ring now, then we connect the customer");
+    } catch (err) { toast(err.message); }
   };
   document.getElementById("erase").onclick = async () => {
     if (!confirm("Permanently erase this customer and all their calls, bookings, leads and messages? This cannot be undone.")) return;

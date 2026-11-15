@@ -77,13 +77,16 @@ test("post-call analysis asks Claude for structured JSON and stores it", async (
   const { analyzeCall } = await import("../server/analysis.js");
   const db = new Store(null);
   const org = db.insert("orgs", { name: "Glow", ownerPhone: "", alertsEnabled: true });
+  const qaAgent = db.insert("agents", { orgId: org.id, businessInfo: "Bridal makeup 15000", extractFields: [{ name: "Wedding date", description: "when the wedding is" }] });
   const call = db.insert("calls", {
-    orgId: org.id, agentId: "a1", channel: "phone", callerNumber: "+919000000002", summary: "",
+    orgId: org.id, agentId: qaAgent.id, channel: "phone", callerNumber: "+919000000002", summary: "",
     transcript: [{ role: "agent", text: "Hello!" }, { role: "caller", text: "Do you do bridal makeup? My wedding is next month." }],
   });
   const report = {
     summary: "Bride asked about bridal makeup for next month.", intent: "sales_lead", sentiment: "positive",
     lead_score: "hot", language: "English", follow_up_needed: true, follow_up_note: "Call back with bridal packages.",
+    quality: { score: 88, accuracy: 5, helpfulness: 4, empathy: 4, resolution: 4, issues: [] },
+    extracted: [{ name: "Wedding date", value: "next month" }, { name: "Not asked for", value: "x" }],
   };
   replies = [[{ type: "text", text: JSON.stringify(report) }]];
   const before = requests.length;
@@ -94,6 +97,9 @@ test("post-call analysis asks Claude for structured JSON and stores it", async (
   assert.deepEqual(req.output_config.format.schema.required.sort(), Object.keys(report).sort());
   assert.equal(req.output_config.format.schema.additionalProperties, false);
   assert.equal(analysis.leadScore, "hot");
+  assert.equal(analysis.quality.score, 88);
+  assert.deepEqual(analysis.extracted, { "Wedding date": "next month" }); // only the owner's fields are kept
+  assert.match(req.messages[0].content, /Custom fields to extract: Wedding date/);
   assert.equal(db.get("calls", call.id).summary, report.summary);
   // A hot lead without a booking alerts the owner.
   assert.equal(db.find("alerts", (a) => a.kind === "hot_lead").length, 1);

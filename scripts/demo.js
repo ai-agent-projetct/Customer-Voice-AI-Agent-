@@ -151,6 +151,12 @@ export function seedDemo(target = file) {
           intent, sentiment, leadScore, language: { "en-IN": "English", "hi-IN": "Hindi + English", "ta-IN": "Tamil + English" }[lang],
           followUpNeeded: leadScore === "warm" || sentiment === "negative",
           followUpNote: sentiment === "negative" ? "Call back and apologise; offer a free hair spa." : leadScore === "warm" ? "Call back with bridal packages." : "",
+          quality: sentiment === "negative"
+            ? { score: 62, accuracy: 4, helpfulness: 3, empathy: 4, resolution: 2, issues: ["Could not resolve the complaint on the call: owner follow-up needed."] }
+            : intent === "enquiry" && leadScore === "none"
+              ? { score: 78, accuracy: 5, helpfulness: 4, empathy: 4, resolution: 3, issues: ["Caller left without booking: offer a specific slot next time."] }
+              : { score: 88 + Math.floor(rand() * 10), accuracy: 5, helpfulness: 5, empathy: 4, resolution: 5, issues: [] },
+          extracted: leadScore === "warm" ? { "Occasion": "Wedding in March" } : service ? { "Preferred time": "Evening" } : {},
         },
       });
       db.update("customers", person.id, { calls: (person.calls || 0) + 1, lastCallAt: createdAt });
@@ -193,6 +199,11 @@ export function seedDemo(target = file) {
     ],
   });
 
+  // An order, a callback a caller asked for, and what to capture from calls.
+  db.update("agents", agent.id, { ordersEnabled: true, extractFields: [{ name: "Occasion", description: "wedding, party, festival…" }, { name: "Preferred time", description: "morning or evening" }], departments: [{ name: "Bridal desk", number: "+919800000011" }] });
+  db.insert("orders", { orgId: org.id, agentId: agent.id, callId: null, ref: "A1B2C3", customerName: customers[3].name, phone: customers[3].phone, items: [{ name: "Hair spa", quantity: 2, price: 900 }], total: 1800, fulfilment: "pickup", address: "", notes: "Gift vouchers", status: "new", source: "phone", createdAt: at(0, "11:05") });
+  db.insert("callbacks", { orgId: org.id, agentId: agent.id, phone: customers[6].phone, name: customers[6].name, reason: "Bridal package prices", goal: "", date: addDays(today, 1), time: "11:30", language: "hi-IN", status: "pending", attempts: 0, source: "phone" });
+
   // Questions waiting to be taught.
   for (const [question, count] of [["Do you do home visits for brides?", 4], ["Can I pay with UPI?", 3], ["Do you have a kids' haircut price?", 2]]) {
     db.insert("questions", { orgId: org.id, agentId: agent.id, callId: null, question, status: "open", count, answer: "" });
@@ -220,10 +231,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const { startScheduler } = await import("../server/scheduler.js");
     const port = Number(process.env.PORT) || 3000;
     startScheduler(db);
-    createApp(db).listen(port, () => {
+    const { attachRealtime } = await import("../server/realtime.js");
+    const server = createApp(db).listen(port, () => {
       console.log(`VoiceDesk demo running at http://localhost:${port}`);
       console.log(`Dashboard: http://localhost:${port}/app  ·  log in as ${DEMO_LOGIN.email} / ${DEMO_LOGIN.password}`);
     });
+    attachRealtime(server, db);
   } else {
     console.log(`Log in at /app as ${DEMO_LOGIN.email} / ${DEMO_LOGIN.password}`);
   }

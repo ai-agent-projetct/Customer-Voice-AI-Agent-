@@ -60,6 +60,8 @@ export function growthRouter(db, auth) {
       language: agentLanguages(agent).includes(b.language) ? b.language : agent.language,
       window,
       maxConcurrent: Math.min(5, Math.max(1, Number(b.maxConcurrent) || 2)),
+      maxAttempts: Math.min(3, Math.max(1, Number(b.maxAttempts) || 2)),
+      retryMinutes: Math.min(1440, Math.max(10, Number(b.retryMinutes) || 60)),
       consentConfirmed: true,
       consentConfirmedBy: req.user.email,
       consentConfirmedAt: new Date().toISOString(),

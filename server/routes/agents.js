@@ -14,6 +14,7 @@ const AGENT_FIELDS = [
   "name", "language", "voice", "greeting", "businessInfo", "instructions", "services", "faqs",
   "bookingEnabled", "transferNumber", "phoneNumber", "hours", "timeZone", "active", "widgetEnabled",
   "languages", "languageMenu", "voiceGender", "speakingRate", "greetings", "voices", "voiceEngine",
+  "voiceMode", "recordCalls", "departments", "extractFields", "ordersEnabled", "whatsappEnabled", "whatsappNumber",
 ];
 
 export function agentsRouter(db, auth) {
@@ -38,6 +39,13 @@ export function agentsRouter(db, auth) {
       voiceGender: "female",
       speakingRate: "normal",
       voiceEngine: "standard",
+      voiceMode: "standard", // "realtime" = streaming replies with barge-in (ConversationRelay)
+      recordCalls: false,
+      departments: [],
+      extractFields: [],
+      ordersEnabled: false,
+      whatsappEnabled: false,
+      whatsappNumber: "",
       greetings: {},
       voices: {},
       transferNumber: "",
@@ -157,7 +165,21 @@ function validateAgent(c) {
     }
     c[key] = Object.fromEntries(Object.entries(map).filter(([, v]) => v.trim()).map(([k, v]) => [k, v.trim()]));
   }
-  for (const key of ["bookingEnabled", "active", "widgetEnabled"]) if (key in c && typeof c[key] !== "boolean") return `${key} must be true or false.`;
+  if ("voiceMode" in c && !["standard", "realtime"].includes(c.voiceMode)) return "Voice mode must be standard or realtime.";
+  if ("whatsappNumber" in c) {
+    if (typeof c.whatsappNumber !== "string") return "WhatsApp number must be text.";
+    c.whatsappNumber = c.whatsappNumber ? normalizePhone(c.whatsappNumber) : "";
+  }
+  if ("departments" in c) {
+    if (!Array.isArray(c.departments) || c.departments.length > 10 || !c.departments.every((d) => d && typeof d.name === "string" && typeof d.number === "string")) return "Each team needs a name and a phone number.";
+    c.departments = c.departments.filter((d) => d.name.trim() && d.number.trim()).map((d) => ({ name: d.name.trim().slice(0, 40), number: normalizePhone(d.number) }));
+    if (new Set(c.departments.map((d) => d.name.toLowerCase())).size !== c.departments.length) return "Team names must be different.";
+  }
+  if ("extractFields" in c) {
+    if (!Array.isArray(c.extractFields) || c.extractFields.length > 12 || !c.extractFields.every((f) => f && typeof f.name === "string")) return "Each field needs a name.";
+    c.extractFields = c.extractFields.filter((f) => f.name.trim()).map((f) => ({ name: f.name.trim().slice(0, 40), description: String(f.description || "").trim().slice(0, 200) }));
+  }
+  for (const key of ["bookingEnabled", "active", "widgetEnabled", "recordCalls", "ordersEnabled", "whatsappEnabled"]) if (key in c && typeof c[key] !== "boolean") return `${key} must be true or false.`;
   for (const key of ["phoneNumber", "transferNumber"]) if (c[key]) c[key] = normalizePhone(c[key]);
   if ("services" in c) {
     if (!Array.isArray(c.services) || c.services.length > 100) return "Services must be a list (100 max).";

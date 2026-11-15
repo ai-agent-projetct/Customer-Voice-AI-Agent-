@@ -247,3 +247,8 @@ main, .grid-2 > *, .editor > * { min-width: 0; }
 .phone-controls select { width: auto; background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.15); color: #fff; }
 .phone-controls select option { color: var(--ink); }
 .lang-now { flex-basis: 100%; font-size: 12px; color: #8fe3c9; font-weight: 700; }
+
+/* ---------- v4: quality, developers ---------- */
+.qrow { display: grid; grid-template-columns: 110px 1fr 44px; gap: 10px; align-items: center; margin: 8px 0; font-size: 14px; }
+.check.small { font-weight: 500; margin: 0; }
+.taught li .btn { margin-left: 8px; }

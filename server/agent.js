@@ -25,7 +25,7 @@ export function buildSystemPrompt(db, agent, call) {
   const campaign = call.campaignId ? db.get("campaigns", call.campaignId) : null;
 
   return [
-    campaign
+    campaign || call.direction === "outbound"
       ? `You are ${agent.name}, an AI assistant phoning a customer on behalf of ${org?.name ?? "this business"}. You placed this call.`
       : `You are ${agent.name}, the AI phone receptionist for ${org?.name ?? "this business"}. You are on a live phone call.`,
     `Today is ${todayIn(agent.timeZone)} (${agent.timeZone}).`,
@@ -52,6 +52,9 @@ export function buildSystemPrompt(db, agent, call) {
     campaign
       ? `\nPurpose of this call: ${campaign.goal}\nIf they are not interested, thank them and end the call. If they ask not to be called again, use do_not_call.`
       : "",
+    call.goal ? `\nPurpose of this call: ${call.goal}` : "",
+    (agent.departments || []).length ? `Teams you can transfer to: ${agent.departments.map((d) => d.name).join(", ")}.` : "",
+    agent.ordersEnabled ? "You can take orders for the items in the services and prices list: read the order and total back before placing it." : "",
     customer ? `\n<caller_profile>\n${customerContext(db, customer)}\n</caller_profile>` : "",
     "",
     "<business_information>",
@@ -84,12 +87,15 @@ export function speakable(text) {
  * Handle one caller utterance. Mutates `call` (history + transcript) and
  * returns { reply, action } where action is null | {type:"hangup"|"transfer"}.
  */
-export async function respond(db, agent, call, userText) {
+export async function respond(db, agent, call, userText, { onText } = {}) {
   call.transcript.push({ role: "caller", text: userText, at: new Date().toISOString() });
   // Caller typed or was transcribed in another of our languages' scripts: follow them.
   const detected = detectLanguage(agent, userText, call.language ?? agent.language);
   if (detected) switchLanguage(db, agent, call, detected, "detected");
-  const outcome = aiEnabled() ? await claudeTurn(db, agent, call, userText) : demoTurn(db, agent, call, userText);
+  // onText (real-time calls) receives the reply piece by piece as Claude writes it.
+  const stream = onText && ((delta) => onText(delta.replace(/[*_#`>]/g, "")));
+  const outcome = aiEnabled() ? await claudeTurn(db, agent, call, userText, stream) : demoTurn(db, agent, call, userText);
+  outcome.streamed = Boolean(stream && aiEnabled() && outcome.streamed);
   const reply = speakable(outcome.reply) || "Sorry, could you say that again?";
   call.transcript.push({ role: "agent", text: reply, at: new Date().toISOString() });
   if (outcome.action?.summary) call.summary = outcome.action.summary;
@@ -101,10 +107,10 @@ export async function respond(db, agent, call, userText) {
     system: call.system,
     promptLanguage: call.promptLanguage,
   });
-  return { reply, action: outcome.action ?? null, language: call.language ?? agent.language };
+  return { reply, action: outcome.action ?? null, language: call.language ?? agent.language, streamed: outcome.streamed };
 }
 
-async function claudeTurn(db, agent, call, userText) {
+async function claudeTurn(db, agent, call, userText, onText) {
   // The history is append-only: Claude's full response content (including
   // thinking blocks) is kept exactly as returned.
   const turnStart = call.messages.length;
@@ -142,7 +148,7 @@ async function claudeTurn(db, agent, call, userText) {
         system,
         tools,
         messages: call.messages,
-      });
+      }, onText);
     } catch (error) {
       console.error("Claude request failed:", error instanceof Anthropic.APIError ? `${error.status} ${error.message}` : error);
       call.messages.length = turnStart; // drop this turn so the history stays valid for a retry
@@ -171,7 +177,7 @@ async function claudeTurn(db, agent, call, userText) {
     if (action) break; // hanging up or transferring: nothing more to say
   }
   call.promptLanguage = call.language ?? agent.language; // switch_language results told Claude already
-  return { reply: spoken.join(" "), action };
+  return { reply: spoken.join(" "), action, streamed: spoken.length > 0 };
 }
 
 // Models that accept {role: "system"} entries inside `messages`.

@@ -5,6 +5,7 @@ import express from "express";
 import { Store } from "./db.js";
 import { aiEnabled } from "./llm.js";
 import { startScheduler } from "./scheduler.js";
+import { attachRealtime } from "./realtime.js";
 import { apiRouter } from "./routes/api.js";
 import { twilioRouter } from "./routes/twilio.js";
 import { cachedAudio } from "./tts.js";
@@ -46,8 +47,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const db = new Store(process.env.DATA_FILE || path.join(here, "..", "data", "db.json"));
   const port = Number(process.env.PORT) || 3000;
   startScheduler(db);
-  createApp(db).listen(port, () => {
+  const server = createApp(db).listen(port, () => {
     console.log(`VoiceDesk running at http://localhost:${port}`);
     console.log(aiEnabled() ? "AI: Claude is on." : "AI: demo mode (set ANTHROPIC_API_KEY to turn on real answers).");
   });
+  attachRealtime(server, db);
 }

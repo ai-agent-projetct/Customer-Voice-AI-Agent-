@@ -7,6 +7,8 @@ import { dialCampaigns } from "./campaigns.js";
 import { endCall } from "./calls.js";
 import { dailyBrief } from "./insights.js";
 import { queueMessage } from "./messaging.js";
+import { placeDueCalls } from "./outbound.js";
+import { retryDeliveries } from "./webhooks.js";
 import { localParts, minutesBetween } from "./util.js";
 
 const STALE_MINUTES = 45;
@@ -19,6 +21,8 @@ export async function tick(db, now = new Date()) {
   sendBriefs(db, now);
   closeStaleCalls(db, now);
   await dialCampaigns(db, now);
+  await placeDueCalls(db, now);
+  await retryDeliveries(db, now);
 }
 
 export function sendReminders(db, now = new Date()) {
@@ -58,7 +62,8 @@ export function sendBriefs(db, now = new Date()) {
 
 export function closeStaleCalls(db, now = new Date()) {
   const cutoff = new Date(now.getTime() - STALE_MINUTES * 60e3).toISOString();
-  for (const call of db.find("calls", (c) => c.status === "live" && c.createdAt < cutoff)) {
+  const dayAgo = new Date(now.getTime() - 24 * 3600e3).toISOString(); // WhatsApp chats stay open for a day of silence
+  for (const call of db.find("calls", (c) => c.status === "live" && (c.channel === "whatsapp" ? (c.transcript.at(-1)?.at ?? c.createdAt) < dayAgo : c.createdAt < cutoff))) {
     const last = call.transcript.at(-1)?.at ?? call.createdAt;
     endCall(db, call, "timed-out", Math.round((Date.parse(last) - Date.parse(call.createdAt)) / 1000));
   }

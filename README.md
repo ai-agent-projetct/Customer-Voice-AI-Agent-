@@ -7,6 +7,7 @@ such as Hinglish.
 
 **Read first:**
 - [docs/STRATEGY.md](docs/STRATEGY.md): market analysis, positioning and why these features
+- [docs/FEATURES.md](docs/FEATURES.md): every feature, which reference product has it, and how far it has been verified
 - [docs/LEARN.md](docs/LEARN.md): how voice AI works, how to run it, and how to launch
 
 ## What's in the product
@@ -20,6 +21,9 @@ such as Hinglish.
 | **Quality** | **Readiness Test Lab**: AI role-plays tough callers and an AI examiner scores the receptionist with exact fixes |
 | **After the call** | **AI analysis** (summary, intent, mood, hot/warm/cold lead score) · WhatsApp/SMS **confirmations** · **reminders** the day before · hot-lead and unhappy-caller **alerts** |
 | **Owner** | **ROI dashboard** (revenue in ₹, after-hours calls caught) · **daily WhatsApp brief** · **live calls with one-tap takeover** · customers · bookings · leads · CSV export · **erase customer data** |
+| **Real-time & telephony** | **Real-time mode** (streaming replies, callers can interrupt) · call recording · teams for transfers · **click-to-call** · **scheduled callbacks** · **WhatsApp chat** on the same AI · **order-taking** |
+| **Quality** | **Every call scored** (accuracy, helpfulness, empathy, resolution) · common problems · calls to review · **custom details captured** from each call |
+| **Developers** | **REST API** with API keys · **signed webhooks** with retries · **speed to lead** (a new lead gets an AI call in seconds) |
 | **Growth** | **Outbound campaigns** (win-back, reminders) with consent records, a 9am–9pm calling window, do-not-call and AI disclosure enforced in code · **website voice/chat widget** |
 | **Business** | Plans with minute and receptionist limits · a polite hand-off to a person when minutes run out · **platform admin console** · rate limiting · Twilio signature checks |
 
@@ -66,7 +70,7 @@ To see the admin console, put your email in `ADMIN_EMAILS`.
 npm test
 ```
 
-There are 21 end-to-end tests, all running without any paid account. They cover accounts and
+There are 43 end-to-end tests, all running without any paid account. They cover accounts and
 data isolation, phone webhooks and signature checks, booking rules, the Claude tool loop and
 structured analysis (against a fake API), caller memory, self-service privacy, the teaching
 loop, alerts, ROI, briefs, reminders, live takeover, plan limits, campaign compliance, the

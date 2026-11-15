@@ -14,6 +14,7 @@ import { switchLanguage } from "../tools.js";
 import { escapeXml, sayXml, speakXml } from "../tts.js";
 import { notifyOwner } from "../messaging.js";
 import { canTakeCalls } from "../plans.js";
+import { realtimeAvailable, relayXml } from "../realtime.js";
 import { normalizePhone } from "../util.js";
 import { wrap } from "./helpers.js";
 
@@ -53,8 +54,8 @@ export function twilioRouter(db) {
       silences: 0,
       ...(menu && { greeting: `[Language menu: ${spoken.map((c) => lang(c).native).join(" · ")}]`, awaitingLanguage: true }),
     });
-    if (menu) return twiml(res, await languageMenu(agent, call));
-    twiml(res, await gather(agent, call, call.greeting));
+    if (menu) return twiml(res, recordingXml(agent, call) + (await languageMenu(agent, call)));
+    twiml(res, recordingXml(agent, call) + (await converse(db, agent, call, call.greeting)));
   }));
 
   // The caller pressed a key or said a language name (or said nothing: main language).
@@ -69,7 +70,7 @@ export function twilioRouter(db) {
     const greeting = greetingFor(agent, customer, code, db.get("orgs", agent.orgId)?.name);
     call.transcript.push({ role: "agent", text: greeting, at: new Date().toISOString() });
     db.update("calls", call.id, { greeting, awaitingLanguage: false, transcript: call.transcript });
-    twiml(res, await gather(agent, call, greeting));
+    twiml(res, await converse(db, agent, call, greeting));
   }));
 
   // Campaign calls: Twilio fetches this when the person picks up.
@@ -78,7 +79,7 @@ export function twilioRouter(db) {
     const agent = call && db.get("agents", call.agentId);
     if (!call || !agent || call.status === "ended") return twiml(res, "<Hangup/>");
     db.update("calls", call.id, { answeredAt: new Date().toISOString(), twilioSid: req.body.CallSid || call.twilioSid });
-    twiml(res, await gather(agent, call, call.greeting));
+    twiml(res, recordingXml(agent, call) + (await converse(db, agent, call, call.greeting)));
   }));
 
   r.post("/gather/:callId", wrap(async (req, res) => {
@@ -114,13 +115,65 @@ export function twilioRouter(db) {
       return twiml(res, `${await speakXml(agent, code(), reply)}<Hangup/>`);
     }
     if (action?.type === "transfer") {
-      const human = agent.transferNumber || db.get("orgs", agent.orgId)?.ownerPhone;
+      const human = action.number || agent.transferNumber || db.get("orgs", agent.orgId)?.ownerPhone;
       if (human) {
         endCall(db, call, "transferred");
         return twiml(res, `${await speakXml(agent, code(), reply)}<Dial>${escapeXml(human)}</Dial>`);
       }
     }
     twiml(res, await gather(agent, call, reply));
+  }));
+
+  // A real-time call's socket session ended: hang up, or dial the person it was handed to.
+  r.post("/relay-done/:callId", (req, res) => {
+    const call = db.get("calls", req.params.callId);
+    if (!call) return twiml(res, "<Hangup/>");
+    let handoff = {};
+    try {
+      handoff = JSON.parse(req.body.HandoffData || "{}");
+    } catch {}
+    endCall(db, call, handoff.outcome || (req.body.SessionStatus === "failed" ? "failed" : "caller-hung-up"));
+    twiml(res, handoff.transfer ? `<Dial>${escapeXml(handoff.transfer)}</Dial>` : "<Hangup/>");
+  });
+
+  // Twilio finished saving a call recording.
+  r.post("/recording/:callId", (req, res) => {
+    const call = db.get("calls", req.params.callId);
+    if (call && req.body.RecordingUrl) {
+      db.update("calls", call.id, { recordingUrl: `${req.body.RecordingUrl}.mp3`, recordingSec: Number(req.body.RecordingDuration) || 0 });
+    }
+    res.sendStatus(204);
+  });
+
+  // Click-to-call: the owner's phone answered; now ring the customer and join them.
+  r.post("/bridge/:callId", (req, res) => {
+    const call = db.get("calls", req.params.callId);
+    if (!call || call.channel !== "bridge") return twiml(res, "<Hangup/>");
+    db.update("calls", call.id, { answeredAt: new Date().toISOString() });
+    const callerId = process.env.TWILIO_CALLER_ID ? ` callerId="${escapeXml(process.env.TWILIO_CALLER_ID)}"` : "";
+    twiml(res, `<Say>Connecting you to ${escapeXml(call.customerName || "the customer")}.</Say><Dial${callerId}>${escapeXml(call.callerNumber)}</Dial>`);
+  });
+
+  // WhatsApp chat: set as the WhatsApp sender's "When a message comes in" webhook.
+  // The same receptionist brain answers, in the customer's language, and remembers the chat for 24 hours.
+  r.post("/whatsapp", wrap(async (req, res) => {
+    const to = normalizePhone(String(req.body.To || "").replace(/^whatsapp:/, ""));
+    const from = normalizePhone(String(req.body.From || "").replace(/^whatsapp:/, ""));
+    const text = String(req.body.Body || "").trim().slice(0, 2000);
+    const agent = db.find("agents", (a) => a.active && a.whatsappEnabled && (a.whatsappNumber || a.phoneNumber) === to)[0];
+    const message = (body) => res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response>${body ? `<Message>${escapeXml(body)}</Message>` : ""}</Response>`);
+    if (!agent || !from || !text) return message("");
+    const org = db.get("orgs", agent.orgId);
+    if (!org || !canTakeCalls(db, org)) return message("Sorry, we can't reply here right now. Please call us.");
+    const dayAgo = new Date(Date.now() - 24 * 3600e3).toISOString();
+    let call = db.find("calls", (c) => c.agentId === agent.id && c.channel === "whatsapp" && c.status === "live" && c.callerNumber === from && c.createdAt > dayAgo).at(-1);
+    if (!call) {
+      call = startCall(db, agent, { channel: "whatsapp", callerNumber: from, greeting: phrase(agent.language, "chat", { org: org.name }) });
+    }
+    const { reply, action } = await respond(db, agent, call, text);
+    if (action) endCall(db, call, action.type === "transfer" ? "transferred" : "completed");
+    const human = action?.type === "transfer" && (action.number || agent.transferNumber || org.ownerPhone);
+    message(human ? `${reply}\n${human}` : reply);
   }));
 
   // Set as the number's "Call status changes" webhook (campaign calls set it
@@ -136,6 +189,18 @@ export function twilioRouter(db) {
   });
 
   return r;
+}
+
+/** Real-time socket for receptionists in real-time mode (when the server has a public URL), else say-then-listen. */
+async function converse(db, agent, call, text) {
+  if (agent.voiceMode === "realtime" && realtimeAvailable()) return relayXml(db, agent, call, text);
+  return gather(agent, call, text);
+}
+
+/** Start recording the whole call (both sides) when the receptionist is set to record. */
+function recordingXml(agent, call) {
+  if (!agent.recordCalls) return "";
+  return `<Start><Recording recordingStatusCallback="/twilio/recording/${call.id}" recordingStatusCallbackEvent="completed"/></Start>`;
 }
 
 /** Say `text`, then listen, both in the call's current language. */
