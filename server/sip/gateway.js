@@ -18,6 +18,9 @@ import { normalizePhone } from "../util.js";
 import { incoming, liveSessions } from "../voice/router.js";
 import { VoiceSession } from "../voice/session.js";
 import { SipUA } from "./ua.js";
+import { greetingFor } from "../agent.js";
+import { FlowError, flowProblem, runFlow } from "./flow.js";
+import { fetchBytes, postJson, saveRecording } from "./records.js";
 
 /** Filled in when the gateway starts; carriers.js uses it for the "voicedesk" carrier. */
 export const sipHooks = { enabled: false, canDial: false };
@@ -96,6 +99,7 @@ async function onInvite(db, ua, leg) {
   const dialled = normalizePhone(leg.toUser);
   const number = db.find("numbers", (n) => n.carrier === "voicedesk" && n.number === dialled)[0];
   if (!number) return leg.reject(404);
+  if (number.voiceUrl) return programmableInbound(db, ua, leg, number); // the developer's own call flow
   leg.ringing();
   const out = incoming(db, number, { from: leg.fromUser, providerCallId: leg.callId });
   if (out.refuse) {
@@ -105,6 +109,7 @@ async function onInvite(db, ua, leg) {
   }
   await leg.answer();
   if (leg.state === "ended") return endCall(db, out.call, "caller-hung-up");
+  if (number.record) leg.rtp.startRecording();
   attach(db, out.call.id, leg);
 }
 
@@ -124,6 +129,7 @@ function attach(db, callId, leg) {
   leg.rtp.onAudio = (pcm) => session.audio(pcm);
   leg.rtp.onDtmf = (digit) => session.dtmf(digit);
   leg.once("end", () => {
+    keepRecording(db, callId, leg);
     if (legsByCall.get(callId)?.leg === leg) {
       session.closed();
       legsByCall.delete(callId);
@@ -181,4 +187,140 @@ async function dial(db, ua, { from, to, callId, bridgeTo: customer }) {
       endCall(db, call, outcome);
     });
   return { ok: true, id: pendingId };
+}
+
+/** Save the whole-call recording (if one was running) before the call record closes. */
+function keepRecording(db, callId, leg) {
+  const pcm = leg.rtp?.finalRecording;
+  const call = db.get("calls", callId);
+  if (!pcm?.length || !call || call.recordingId) return;
+  leg.rtp.finalRecording = null;
+  const row = saveRecording(db, { orgId: call.orgId, callId, pcm, kind: "call" });
+  db.update("calls", callId, { recordingId: row.id });
+}
+
+// ---------------- Programmable calls (VoiceDesk call flows) ----------------
+function flowCallRecord(db, number, extra) {
+  return db.insert("calls", {
+    orgId: number.orgId, agentId: number.agentId ?? null, agentName: "Call flow", channel: "api", carrier: "voicedesk",
+    numberId: number.id, fromNumber: number.number, status: "live", transcript: [], messages: [], summary: "", durationSec: 0,
+    flowLog: [], ...extra,
+  });
+}
+
+async function programmableInbound(db, ua, leg, number) {
+  leg.ringing();
+  await leg.answer();
+  const call = flowCallRecord(db, number, {
+    direction: "inbound", callerNumber: normalizePhone(leg.fromUser), providerCallId: leg.callId,
+    answeredAt: new Date().toISOString(), statusCallback: number.statusCallback || null,
+  });
+  if (number.record) leg.rtp.startRecording();
+  runProgrammable(db, ua, leg, call.id, { answerUrl: number.voiceUrl });
+}
+
+/** Place a programmable call (Voice API). Returns the call record at once; the flow runs when answered. */
+export function dialFlow(db, { number, to, flow, answerUrl, statusCallback, record }) {
+  const ua = sipHooks.ua;
+  const call = flowCallRecord(db, number, { direction: "outbound", callerNumber: normalizePhone(to), statusCallback: statusCallback || null });
+  ua.invite({ to: dialFormat(to), from: dialFormat(number.number), onLeg: (leg) => db.update("calls", call.id, { providerCallId: leg.callId }) })
+    .then((leg) => {
+      const current = db.get("calls", call.id);
+      if (!current || current.status === "ended") return leg.bye();
+      db.update("calls", call.id, { answeredAt: new Date().toISOString() });
+      if (record) leg.rtp.startRecording();
+      runProgrammable(db, ua, leg, call.id, { flow, answerUrl });
+    })
+    .catch((err) => {
+      const current = db.get("calls", call.id);
+      if (!current || current.status === "ended") return;
+      endCall(db, current, err.status === 486 || err.status === 600 ? "busy" : [408, 480, 487].includes(err.status) ? "no-answer" : "failed");
+    });
+  return call;
+}
+
+export function hangupCall(db, callId) {
+  const call = db.get("calls", callId);
+  const leg = call?.providerCallId && sipHooks.ua?.calls.get(call.providerCallId);
+  if (leg) return leg.bye();
+  if (call && call.status !== "ended") endCall(db, call, "canceled");
+}
+
+async function runProgrammable(db, ua, leg, callId, { flow, answerUrl }) {
+  const call = () => db.get("calls", callId);
+  const org = db.get("orgs", call().orgId);
+  const about = () => {
+    const c = call();
+    return { call_id: callId, direction: c.direction, from: c.direction === "outbound" ? c.fromNumber : c.callerNumber, to: c.direction === "outbound" ? c.callerNumber : c.fromNumber };
+  };
+  const log = (event) => {
+    const c = call();
+    if (c) db.update("calls", callId, { flowLog: [...(c.flowLog || []), { at: new Date().toISOString(), ...event }].slice(-100) });
+  };
+  let handedToAi = false;
+  leg.once("end", (reason) => {
+    keepRecording(db, callId, leg);
+    const c = call();
+    if (!handedToAi && c && c.status !== "ended") endCall(db, c, reason === "local-bye" ? "completed" : "caller-hung-up");
+  });
+  const ctx = {
+    db, org, callId, leg,
+    language: db.get("agents", call().agentId)?.language || "en-IN",
+    fetchFlow: async (url, payload) => {
+      const res = await postJson(url, { ...about(), ...payload });
+      return Array.isArray(res) ? res : res?.flow ?? null;
+    },
+    fetchAudio: (url) => fetchBytes(url),
+    bridge: (number, callerId) => bridgeAndWait(ua, leg, number, callerId || call().fromNumber),
+    startAi: (agentId) => {
+      const agent = (agentId && db.find("agents", (a) => a.id === agentId && a.orgId === org.id)[0]) || db.get("agents", call().agentId) || db.find("agents", (a) => a.orgId === org.id && a.active)[0];
+      if (!agent) throw new FlowError("No AI receptionist to hand the call to.");
+      handedToAi = true;
+      const greeting = greetingFor(agent, null, agent.language, org.name);
+      db.update("calls", callId, { agentId: agent.id, agentName: agent.name, channel: "phone", language: agent.language, greeting, transcript: [{ role: "agent", text: greeting, at: new Date().toISOString() }] });
+      attach(db, callId, leg);
+    },
+    recordingDone: (pcm, meta) => saveRecording(db, { orgId: org.id, callId, pcm, kind: meta.kind }),
+    log,
+  };
+  try {
+    const steps = flow ?? (await ctx.fetchFlow(answerUrl, { event: "call.answered" }));
+    const problem = steps ? flowProblem(steps) : "The answer URL returned no flow.";
+    if (problem) throw new FlowError(problem);
+    const result = await runFlow(ctx, steps);
+    if (result === "done" && leg.state !== "ended") {
+      await leg.rtp.drained();
+      await leg.bye(); // like other platforms: the call ends when the flow runs out
+    }
+  } catch (err) {
+    log({ error: err.message });
+    db.update("calls", callId, { error: err.message });
+    if (leg.state !== "ended" && !handedToAi) await leg.bye();
+  }
+}
+
+/** dial step: call another number and join the audio until that call ends. */
+function bridgeAndWait(ua, leg, number, from) {
+  return new Promise((resolve) => {
+    ua.invite({ to: dialFormat(number), from: dialFormat(from) })
+      .then((other) => {
+        const before = leg.rtp.onAudio;
+        const pipe = (b) => (pcm) => {
+          if (b.rtp.queue.length > 10) b.rtp.queue.splice(0, b.rtp.queue.length - 10);
+          b.rtp.play(pcm);
+        };
+        leg.rtp.onAudio = pipe(other);
+        other.rtp.onAudio = pipe(leg);
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          leg.rtp.onAudio = before;
+          resolve("completed");
+        };
+        other.once("end", finish);
+        leg.once("end", () => { other.bye(); finish(); });
+      })
+      .catch((err) => resolve(err.status === 486 || err.status === 600 ? "busy" : [408, 480, 487].includes(err.status) ? "no-answer" : "failed"));
+  });
 }

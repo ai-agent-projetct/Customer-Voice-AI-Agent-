@@ -16,6 +16,7 @@ import { emitEvent } from "../webhooks.js";
 import { normalizePhone } from "../util.js";
 import { hashKey } from "./developer.js";
 import { rateLimiter, wrap } from "./helpers.js";
+import { voiceApiRouter } from "./voice-api.js";
 
 export function v1Router(db) {
   const r = express.Router();
@@ -32,7 +33,9 @@ export function v1Router(db) {
     next();
   });
 
-  const publicCall = ({ messages, system, widgetSecretHash, relayToken, verifiedRefs, demo, ...c }, withTranscript) => {
+  r.use("/voice", express.json({ limit: "100kb" }), voiceApiRouter(db));
+
+  const publicCall = ({ messages, system, widgetSecretHash, relayToken, streamToken, verifiedRefs, demo, ...c }, withTranscript) => {
     const { transcript, ...rest } = c;
     return withTranscript ? c : { ...rest, turns: transcript?.length ?? 0 };
   };

@@ -64,7 +64,9 @@ export class RtpSession {
     let next = performance.now();
     const tick = () => {
       if (this.closed) return;
-      this.sendFrame(this.queue.length ? this.queue.shift() : this.silence);
+      const out = this.queue.length ? this.queue.shift() : this.silence;
+      this.sendFrame(out);
+      if (this.recording) this.recordTick(out);
       next += 20;
       this.timer = setTimeout(tick, Math.max(0, next - performance.now()));
     };
@@ -97,8 +99,10 @@ export class RtpSession {
       }
       return;
     }
-    if (pt === 0) this.onAudio?.(decodeMulaw(payload));
-    else if (pt === 8) this.onAudio?.(decodeAlaw(payload));
+    const pcm = pt === 0 ? decodeMulaw(payload) : pt === 8 ? decodeAlaw(payload) : null;
+    if (!pcm) return;
+    if (this.recording && this.heardQueue.length < 50) this.heardQueue.push(pcm);
+    this.onAudio?.(pcm);
   }
 
   /** Queue audio to play (any length; split into 20 ms frames). */
@@ -109,6 +113,40 @@ export class RtpSession {
       this.queue.push(frame);
     }
     this.start();
+  }
+
+  // ---- Call recording: both sides mixed, one 20 ms frame per tick ----
+  startRecording() {
+    this.recording = true;
+    this.heardQueue = [];
+    this.recorded = [];
+    this.start();
+  }
+
+  recordTick(out) {
+    const heard = this.heardQueue.shift();
+    const mixed = new Int16Array(FRAME);
+    for (let i = 0; i < FRAME; i++) mixed[i] = Math.max(-32768, Math.min(32767, (out[i] || 0) + (heard?.[i] || 0)));
+    this.recorded.push(mixed);
+    if (this.recorded.length > 3 * 60 * 60 * 50) this.recording = false; // 3 hours max
+  }
+
+  /** Stops recording and returns the mixed audio. */
+  stopRecording() {
+    this.recording = false;
+    const frames = this.recorded || [];
+    this.recorded = [];
+    const pcm = new Int16Array(frames.length * FRAME);
+    frames.forEach((f, i) => pcm.set(f, i * FRAME));
+    return pcm;
+  }
+
+  /** Resolves once everything queued has been sent (or the call ended). */
+  drained() {
+    return new Promise((resolve) => {
+      const check = () => (this.closed || this.queue.length === 0 ? resolve() : setTimeout(check, 20));
+      check();
+    });
   }
 
   /** Barge-in: drop audio not yet sent. */
@@ -137,6 +175,7 @@ export class RtpSession {
 
   close() {
     if (this.closed) return;
+    if (this.recording) this.finalRecording = this.stopRecording();
     this.closed = true;
     clearTimeout(this.timer);
     try { this.socket.close(); } catch {}

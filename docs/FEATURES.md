@@ -84,6 +84,9 @@ the build environment, so this relies on search results of their own pages and d
 | GTM multi-agent team (research, content, marketing, engineering over Telegram) | TwistGenAI | ❌ outside VoiceDesk's focus on customer conversations | n/a |
 | Custom CRM / ERP builds | TwistGenAI | ◐ customers, leads, orders and bookings built in; no ERP | n/a |
 | **Own telephony: VoiceDesk Network** (own SIP/RTP engine on an operator SIP trunk; no CPaaS) | Twilio, Plivo, Vobiz, Exotel (as products) | ✅ see `docs/TELEPHONY-PLATFORM.md` | B (9 tests), plus calls both ways with a real SIP softphone (baresip); not yet on a live operator trunk |
+| **Programmable Voice API** (call flows: say, play, gather/IVR, dial, record/voicemail, AI hand-off; answer URLs; status callbacks) | Twilio, Plivo, Vobiz, Exotel | ✅ see `docs/VOICE-API.md` | B (4 end-to-end tests over real SIP/RTP) |
+| **Call recording, per-minute billing, usage API** on our own network | Twilio, Plivo, Smartflo | ✅ | B |
+| **Deployment kit** (Dockerfile, docker-compose with host networking, Indian VPS guide) | n/a | ✅ see `docs/DEPLOY.md` | Runs in the official Node image; SIP answers inside the container |
 | **Own voice pipeline on any phone company** (Twilio, Plivo, Vobiz, Exotel) | azmth, Edesy (multi-provider) | ✅ see `docs/VOICE-ENGINE.md` | B (each company's stream protocol simulated), C; not yet on a live call |
 | **Pluggable ears and mouth** (Deepgram, Sarvam, ElevenLabs, Deepgram Aura) | Deepgram, Edesy | ✅ automatic choice per language | B (against fake servers) |
 | **Company-owned voice** (your own TTS server) | azmth (own voice) | ✅ HTTP voice-server option | B |

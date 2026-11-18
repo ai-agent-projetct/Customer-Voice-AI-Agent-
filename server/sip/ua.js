@@ -231,11 +231,12 @@ export class SipUA extends EventEmitter {
 
   // ---------------- Outbound calls ----------------
   /** Place a call through the trunk. Resolves to a Leg once answered; rejects with {status} otherwise. */
-  async invite({ to, from, dest = this.trunkDest(), domain = this.domain, onRinging, headers: extra = [] }) {
+  async invite({ to, from, dest = this.trunkDest(), domain = this.domain, onRinging, onLeg, headers: extra = [] }) {
     const socket = await bindRtpSocket(this.opts.rtp);
     const rtp = new RtpSession(socket);
     const leg = new Leg(this, { direction: "outbound", callId: newCallId(), dest, rtp });
     this.calls.set(leg.callId, leg);
+    onLeg?.(leg);
     const uri = `sip:${to}@${domain}`;
     leg.localTag = newTag();
     leg.localUri = `<sip:${from}@${domain}>`;

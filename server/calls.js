@@ -6,6 +6,7 @@ import { campaignCallEnded } from "./campaigns.js";
 import { outboundCallEnded } from "./outbound.js";
 import { recordCall, upsertCustomer } from "./customers.js";
 import { agentLanguages } from "./languages.js";
+import { billCall, notifyStatus } from "./sip/records.js";
 
 /**
  * extra: { channel: "phone"|"web"|"widget"|"simulation", direction?, callerNumber?,
@@ -56,9 +57,13 @@ export function endCall(db, call, outcome, durationSec) {
     endedAt: new Date().toISOString(),
     durationSec: durationSec ?? Math.round((Date.now() - started) / 1000),
   });
+  if (ended.carrier === "voicedesk") {
+    billCall(db, ended); // our own network: per-minute record
+    notifyStatus(db, ended);
+  }
   if (ended.campaignId) campaignCallEnded(db, ended, outcome);
   if (ended.callbackId) outboundCallEnded(db, ended, outcome);
   if (ended.channel === "bridge") return null; // a person-to-person call: nothing to analyse
-  if (ended.channel === "simulation") return null;
+  if (ended.channel === "simulation" || ended.channel === "api") return null; // programmable flows: no AI analysis
   return analyzeCall(db, ended).catch((err) => console.error("analysis error", err));
 }

@@ -1,0 +1,16 @@
+# One server running everything. Host networking is used because phone calls
+# need the SIP port (UDP 5060) and a large UDP range for call audio (RTP):
+# Docker's port mapping handles big UDP ranges poorly.
+services:
+  voicedesk:
+    build: .
+    restart: unless-stopped
+    network_mode: host
+    env_file: .env
+    environment:
+      DATA_FILE: /app/data/db.json
+      RECORDINGS_DIR: /app/data/recordings
+    volumes:
+      - voicedesk-data:/app/data
+volumes:
+  voicedesk-data:
