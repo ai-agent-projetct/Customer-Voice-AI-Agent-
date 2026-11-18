@@ -275,3 +275,13 @@ main, .grid-2 > *, .editor > * { min-width: 0; }
 .switch input { width: auto; }
 .perm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px 14px; }
 .auto + .auto { margin-top: 0; }
+
+/* v6: Phone & voice */
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0 14px; align-items: end; }
+.carrier-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+.carrier-card { border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; }
+.carrier-card label { margin-bottom: 10px; }
+.carrier-card .row-between { margin-bottom: 10px; }
+.url-cell code { display: block; max-width: 340px; overflow-wrap: anywhere; font-size: 12px; margin: 2px 0 6px; }
+#call-box { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
+details summary { cursor: pointer; margin: 6px 0 10px; }

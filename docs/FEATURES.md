@@ -83,6 +83,10 @@ the build environment, so this relies on search results of their own pages and d
 | **Company Brain** (public/internal knowledge vault, call summaries, ask with sources, ask from WhatsApp) | TwistGenAI | ✅ | B, C (keyword search; AI answers need a key) |
 | GTM multi-agent team (research, content, marketing, engineering over Telegram) | TwistGenAI | ❌ outside VoiceDesk's focus on customer conversations | n/a |
 | Custom CRM / ERP builds | TwistGenAI | ◐ customers, leads, orders and bookings built in; no ERP | n/a |
+| **Own voice pipeline on any phone company** (Twilio, Plivo, Vobiz, Exotel) | azmth, Edesy (multi-provider) | ✅ see `docs/VOICE-ENGINE.md` | B (each company's stream protocol simulated), C; not yet on a live call |
+| **Pluggable ears and mouth** (Deepgram, Sarvam, ElevenLabs, Deepgram Aura) | Deepgram, Edesy | ✅ automatic choice per language | B (against fake servers) |
+| **Company-owned voice** (your own TTS server) | azmth (own voice) | ✅ HTTP voice-server option | B |
+| **Talk to your AI in the browser** | Omnidim, Edesy | ✅ same pipeline as phone calls | C |
 | Visual drag-and-drop flow builder | Omnidim, Edesy | ❌ by design: owners describe the business in plain language instead | n/a |
 | Human agent assist and coaching | ConvoZen | ❌ VoiceDesk targets shops without call-centre staff | n/a |
 | Android / iOS app | Smartflo | ❌ the dashboard works on a phone browser; no store app | C (mobile layout) |

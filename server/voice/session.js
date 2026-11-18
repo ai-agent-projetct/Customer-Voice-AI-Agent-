@@ -96,6 +96,7 @@ export class VoiceSession {
     if (this.finished) return;
     this.lastHeardAt = Date.now();
     this.silences = 0;
+    if (this.carrierId === "web") this.send({ event: "caption", role: "caller", text });
     if (this.speaking()) this.interrupt();
     const mine = ++this.turn;
     this.queue = this.queue.then(() => this.reply(text, mine)).catch((err) => console.error("voice turn failed", err));
@@ -178,12 +179,12 @@ export class VoiceSession {
     this.playChain = this.playChain.then(async () => {
       const pcm = await audio;
       if (!pcm || mine !== this.turn || this.finished) return;
+      if (this.carrierId === "web") this.send({ event: "caption", role: "agent", text: clean });
       this.play(pcm);
     });
   }
 
   play(pcm) {
-    if (this.carrierId === "web") this.send({ event: "caption", text: "" });
     for (const frame of chunks(pcm, FRAME * 5)) this.send(this.carrier.media(frame, this.stream, this.options));
     this.send(this.carrier.mark(this.stream, `m${++this.marks}`));
     this.extendSpeaking(durationMs(pcm));

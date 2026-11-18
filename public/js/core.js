@@ -100,6 +100,7 @@ const NAV = [
   ["team", "AI workforce", "M9 7a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM3 21v-2a6 6 0 0 1 12 0v2M17 11l2 2 4-4"],
   ["inbox", "Inbox", "M3 13h5l2 3h4l2-3h5M5 5h14l2 8v6H3v-6z", "inbox"],
   ["live", "Live calls", "M12 12m-3 0a3 3 0 1 0 6 0a3 3 0 1 0-6 0M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14", "live"],
+  ["voice", "Phone & voice", "M5 4h4l2 5-3 2a11 11 0 0 0 5 5l2-3 5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2M15 3a6 6 0 0 1 6 6M15 7a2 2 0 0 1 2 2"],
   ["agents", "Receptionists", "M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5 11a7 7 0 0 0 14 0M12 18v3"],
   ["calls", "Calls", "M5 4h4l2 5-3 2a11 11 0 0 0 5 5l2-3 5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"],
   ["questions", "Teach it", "M9 9a3 3 0 1 1 4 2.8c-.6.3-1 .9-1 1.6V14M12 17h.01M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18", "questions"],

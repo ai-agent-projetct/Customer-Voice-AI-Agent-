@@ -372,6 +372,7 @@ test("settings: secrets never come back to the browser; numbers validated", asyn
   const exo = view.carriers.find((c) => c.id === "exotel");
   assert.equal(exo.ready, true);
   assert.equal(exo.fields.find((f) => f.name === "apiToken").last4, "…1234");
+  assert.equal(exo.fields.find((f) => f.name === "accountSid").value, "exoSID", "non-secret fields are shown back");
   assert.equal(view.engines.keys.sarvam.last4, "…9876");
   assert.equal(view.engines.tts, "custom");
   const me = JSON.stringify((await api(token, "GET", "/me")).body);

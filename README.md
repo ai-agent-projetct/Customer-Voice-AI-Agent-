@@ -24,6 +24,7 @@ such as Hinglish.
 | **Real-time & telephony** | **Real-time mode** (streaming replies, callers can interrupt) · call recording · teams for transfers · **click-to-call** · **scheduled callbacks** · **WhatsApp chat** on the same AI · **order-taking** |
 | **Quality** | **Every call scored** (accuracy, helpfulness, empathy, resolution) · common problems · calls to review · **custom details captured** from each call |
 | **Developers** | **REST API** with API keys · **signed webhooks** with retries · **speed to lead** (a new lead gets an AI call in seconds) |
+| **Own voice engine** | VoiceDesk listens and speaks itself on **any phone company: Twilio, Plivo, Vobiz or Exotel** · ears: Deepgram or Sarvam · voice: ElevenLabs, Sarvam, Deepgram or **your own voice server** · barge-in · talk to your AI in the browser · see `docs/VOICE-ENGINE.md` |
 | **AI workforce** | One AI employee on **WhatsApp, Instagram DM, Messenger**, website and phone, remembering each customer across channels · **Inbox with human takeover** · **roles, permissions, escalation words** · **hand-offs between AI employees** · **activity log** · **refund approvals** · **Company Brain** (knowledge vault, ask from WhatsApp) · **automations**: COD confirmation, abandoned carts, lead follow-ups |
 | **Growth** | **Outbound campaigns** (win-back, reminders) with consent records, a 9am–9pm calling window, do-not-call and AI disclosure enforced in code · **website voice/chat widget** |
 | **Business** | Plans with minute and receptionist limits · a polite hand-off to a person when minutes run out · **platform admin console** · rate limiting · Twilio signature checks |
@@ -71,7 +72,7 @@ To see the admin console, put your email in `ADMIN_EMAILS`.
 npm test
 ```
 
-There are 54 end-to-end tests, all running without any paid account. They cover accounts and
+There are 67 end-to-end tests, all running without any paid account. They cover accounts and
 data isolation, phone webhooks and signature checks, booking rules, the Claude tool loop and
 structured analysis (against a fake API), caller memory, self-service privacy, the teaching
 loop, alerts, ROI, briefs, reminders, live takeover, plan limits, campaign compliance, the

@@ -27,9 +27,9 @@ export function voiceRouter(db, auth) {
 
   r.get("/phone-voice", (req, res) => {
     const org = req.org;
-    const saved = org.carriers || {};
     const carriers = PHONE_CARRIERS.map((id) => {
       const a = CARRIERS[id];
+      const saved = org.carriers?.[id] || {};
       const creds = credsFor(org, id);
       return {
         id, label: a.label, setup: a.setup, ready: carrierReady(org, id),
