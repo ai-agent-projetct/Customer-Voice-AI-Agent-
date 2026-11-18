@@ -11,6 +11,7 @@
 // Exotel (Voicebot applet), and "web" (a call from the dashboard in a browser).
 import { decodeMulaw, encodeMulaw, pcmFromBytes, pcmToBytes } from "./audio.js";
 import { escapeXml } from "../tts.js";
+import { sipHooks } from "../sip/gateway.js";
 
 /** Network seam, replaced in tests. */
 export const carrierNet = { fetch: (...a) => fetch(...a) };
@@ -205,7 +206,21 @@ const web = {
   async transfer() { return { ok: true, viaStream: true }; },
 };
 
-export const CARRIERS = { twilio, plivo, vobiz, exotel, web };
+// ---------------- VoiceDesk Network (our own SIP/RTP telephony, sip/gateway.js) ----------------
+const voicedesk = {
+  id: "voicedesk",
+  label: "VoiceDesk Network",
+  fields: [],
+  internal: true, // no webhooks or streams: audio arrives over RTP inside VoiceDesk
+  media: (pcm) => ({ event: "media", pcm }),
+  clear: () => ({ event: "clear" }),
+  mark: () => null,
+  async dial(c, args) { return sipHooks.dial ? sipHooks.dial(args) : { ok: false, error: "VoiceDesk Network is not running." }; },
+  async hangup(c, id) { return sipHooks.hangup ? sipHooks.hangup(id) : { ok: false }; },
+  async transfer(c, id, opts) { return sipHooks.transfer ? sipHooks.transfer(id, opts) : { ok: false }; },
+};
+
+export const CARRIERS = { twilio, plivo, vobiz, exotel, web, voicedesk };
 export const PHONE_CARRIERS = ["twilio", "plivo", "vobiz", "exotel"];
 
 /** The business's login for a phone company: saved in Settings, else environment variables. */
@@ -220,6 +235,7 @@ export function credsFor(org, carrier) {
 export function carrierReady(org, carrier) {
   const adapter = CARRIERS[carrier];
   if (!adapter) return false;
+  if (carrier === "voicedesk") return Boolean(sipHooks.canDial);
   const c = credsFor(org, carrier);
   return adapter.fields.filter((f) => f.name !== "subdomain").every((f) => c[f.name]);
 }

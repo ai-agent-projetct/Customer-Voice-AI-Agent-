@@ -57,4 +57,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     console.log(aiEnabled() ? "AI: Claude is on." : "AI: demo mode (set ANTHROPIC_API_KEY to turn on real answers).");
   });
   attachRealtime(server, db);
+  if (process.env.SIP_ENABLED === "1") {
+    const { startSipGateway } = await import("./sip/gateway.js");
+    startSipGateway(db).catch((err) => console.error("SIP gateway failed to start:", err.message));
+  }
 }

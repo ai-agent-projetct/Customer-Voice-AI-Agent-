@@ -43,6 +43,7 @@ const wsBase = () => (process.env.PUBLIC_URL || "").replace(/\/$/, "").replace(/
 /** URLs a business pastes into its phone company's console for one number. */
 export function numberUrls(number) {
   const urls = {};
+  if (number.carrier === "voicedesk") return urls; // calls arrive over our own SIP trunk
   if (number.carrier === "exotel") urls.streamUrl = `${wsBase()}/stream/exotel/number/${number.id}/${number.token}`;
   else urls.answerUrl = publicUrl(`/voice/${number.carrier}/answer/${number.id}/${number.token}`);
   return urls;
@@ -52,7 +53,7 @@ export function numberUrls(number) {
  * Accept or refuse an incoming call on one of the business's numbers.
  * Returns { call } or { refuse, human }.
  */
-function incoming(db, number, { from, providerCallId }) {
+export function incoming(db, number, { from, providerCallId }) {
   const agent = number.agentId && db.get("agents", number.agentId);
   const org = db.get("orgs", number.orgId);
   if (!agent || !agent.active || !org) return { refuse: "Sorry, this number is not set up yet. Goodbye." };
@@ -254,7 +255,7 @@ export async function placeCall(db, { call, to, kind = "ai" }) {
     if (placed.ok) db.update("calls", call.id, { twilioSid: placed.sid });
     return placed;
   }
-  if (!process.env.PUBLIC_URL) return { ok: false, error: "Set PUBLIC_URL so the phone company can reach VoiceDesk." };
+  if (!process.env.PUBLIC_URL && number.carrier !== "voicedesk") return { ok: false, error: "Set PUBLIC_URL so the phone company can reach VoiceDesk." };
   const org = db.get("orgs", call.orgId);
   const adapter = CARRIERS[number.carrier];
   const t = streamToken(db, call);

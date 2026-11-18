@@ -285,3 +285,4 @@ main, .grid-2 > *, .editor > * { min-width: 0; }
 .url-cell code { display: block; max-width: 340px; overflow-wrap: anywhere; font-size: 12px; margin: 2px 0 6px; }
 #call-box { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
 details summary { cursor: pointer; margin: 6px 0 10px; }
+.network-card { background: var(--brand-tint); margin-bottom: 4px; }

@@ -225,6 +225,8 @@ test("abandoned carts and lead follow-ups run on schedule and stop when done", a
   const key = (await api(token, "POST", "/developer/api-keys", {})).body.key;
   const cart = (await api(key, "POST", "/v1/carts", { name: "Arjun", phone: "+919811300008", items: [{ name: "Sneakers", price: 3999 }], checkout_url: "https://shop.example/checkout/1", consent: true })).body;
   const t0 = new Date(Math.max(Date.now(), morning().getTime()));
+  // Date the cart at the test's own clock, so the test passes at any hour of the day.
+  db.update("carts", cart.id, { createdAt: t0.toISOString() });
   await tick(db, new Date(t0.getTime() + 10 * 60e3));
   assert.ok(!sent.some((m) => m.kind === "cart_reminder" && m.to === "+919811300008")); // too early
   await tick(db, new Date(t0.getTime() + 31 * 60e3));

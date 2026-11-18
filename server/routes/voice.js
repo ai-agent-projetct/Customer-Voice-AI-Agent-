@@ -11,6 +11,7 @@ import { greetingFor } from "../agent.js";
 import { CARRIERS, PHONE_CARRIERS, carrierReady, credsFor } from "../voice/carriers.js";
 import { KEY_ENV, STT_ENGINES, TTS_ENGINES, chooseEngines, keyFor, previewWav, voiceSettings } from "../voice/engines.js";
 import { numberUrls, placeCall, startWebCall, token } from "../voice/router.js";
+import { sipHooks } from "../sip/gateway.js";
 import { owned, wrap } from "./helpers.js";
 
 const last4 = (v) => (v ? `…${String(v).slice(-4)}` : null);
@@ -51,6 +52,7 @@ export function voiceRouter(db, auth) {
     }));
     res.json({
       publicUrl: process.env.PUBLIC_URL || null,
+      network: { enabled: Boolean(sipHooks.enabled), canDial: Boolean(sipHooks.canDial), registered: Boolean(sipHooks.ua?.registered) },
       carriers,
       numbers: db.find("numbers", (n) => n.orgId === org.id).map(numberView),
       engines: {

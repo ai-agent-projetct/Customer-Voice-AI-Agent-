@@ -165,3 +165,35 @@ export function tone(ms, freq = 440, rate = RATE) {
   }
   return out;
 }
+
+// ---------- G.711 A-law (common on Indian operator trunks) ----------
+export function linearToAlaw(sample) {
+  let s = Math.max(-32768, Math.min(32767, sample));
+  const sign = s >= 0 ? 0xd5 : 0x55;
+  if (s < 0) s = -s - 1;
+  if (s < 256) return ((s >> 4) ^ sign) & 0xff;
+  let exponent = 7;
+  for (let mask = 0x4000; (s & mask) === 0 && exponent > 1; mask >>= 1) exponent--;
+  const mantissa = (s >> (exponent + 3)) & 0x0f;
+  return ((exponent << 4) | mantissa) ^ sign;
+}
+
+export function alawToLinear(byte) {
+  const a = byte ^ 0x55;
+  const exponent = (a & 0x70) >> 4;
+  let magnitude = (a & 0x0f) << 4;
+  magnitude = exponent === 0 ? magnitude + 8 : (magnitude + 0x108) << (exponent - 1);
+  return a & 0x80 ? magnitude : -magnitude;
+}
+
+export function decodeAlaw(buf) {
+  const out = new Int16Array(buf.length);
+  for (let i = 0; i < buf.length; i++) out[i] = alawToLinear(buf[i]);
+  return out;
+}
+
+export function encodeAlaw(pcm) {
+  const out = Buffer.alloc(pcm.length);
+  for (let i = 0; i < pcm.length; i++) out[i] = linearToAlaw(pcm[i]);
+  return out;
+}

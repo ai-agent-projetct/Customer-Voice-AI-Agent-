@@ -158,13 +158,35 @@ route("settings", async () => {
 // ---------- platform admin ----------
 route("admin", async () => {
   const orgs = await api("GET", "/admin/orgs");
+  const numbers = await api("GET", "/admin/numbers");
   const plans = state.catalog.plans;
   shell("admin", `
     <div class="page-head"><div><h1>Platform admin</h1><p class="muted">${orgs.length} businesses on VoiceDesk.</p></div></div>
     <div class="panel"><div class="table-wrap"><table><thead><tr><th>Business</th><th>Owner</th><th>Joined</th><th>Receptionists</th><th>Calls</th><th>Bookings</th><th>Minutes (month)</th><th>Plan</th></tr></thead><tbody>
       ${orgs.map((o) => `<tr><td>${h(o.name)}</td><td>${h(o.owner)}</td><td>${fmtDate(o.createdAt)}</td><td>${o.agents}</td><td>${o.calls}</td><td>${o.bookings}</td><td>${Math.round(o.usage.minutesUsed)}${o.usage.minutesIncluded ? ` / ${o.usage.minutesIncluded}` : ""}</td>
         <td><select data-org="${h(o.id)}" aria-label="Plan">${plans.map((p) => `<option value="${p.id}" ${p.id === o.plan ? "selected" : ""}>${h(p.label)}</option>`).join("")}</select></td></tr>`).join("")}
-    </tbody></table></div></div>`);
+    </tbody></table></div></div>
+    <div class="panel">
+      <h2>VoiceDesk Network numbers</h2>
+      <p class="muted small">Numbers on your own operator SIP line (see docs/TELEPHONY-PLATFORM.md). Give a number to a business: calls to it go straight to their receptionist.</p>
+      ${numbers.length ? `<div class="table-wrap"><table><thead><tr><th>Number</th><th>Business</th><th>Label</th><th></th></tr></thead><tbody>
+        ${numbers.map((n) => `<tr><td><b>${h(n.number)}</b></td><td>${h(n.orgName || "")}</td><td>${h(n.label || "")}</td><td><button class="btn small" data-free="${h(n.id)}">Take back</button></td></tr>`).join("")}
+      </tbody></table></div>` : `<p class="muted">No numbers given out yet.</p>`}
+      <form id="give-number" class="form-grid" style="margin-top:12px">
+        <label>Number<input name="number" placeholder="+91 80 4710 0001" required></label>
+        <label>Business<select name="orgId">${orgs.map((o) => `<option value="${h(o.id)}">${h(o.name)}</option>`).join("")}</select></label>
+        <label>Label<input name="label" placeholder="Main line"></label>
+        <div><button class="btn btn-primary">Give number</button></div>
+      </form>
+    </div>`);
+  document.getElementById("give-number").onsubmit = async (e) => {
+    e.preventDefault();
+    try { await api("POST", "/admin/numbers", Object.fromEntries(new FormData(e.target).entries())); toast("Number given"); window.dispatchEvent(new HashChangeEvent("hashchange")); } catch (err) { toast(err.message); }
+  };
+  document.querySelectorAll("[data-free]").forEach((b) => (b.onclick = async () => {
+    await api("DELETE", `/admin/numbers/${b.dataset.free}`).catch((err) => toast(err.message));
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+  }));
   document.querySelectorAll("select[data-org]").forEach((s) => {
     s.onchange = async () => { await api("PUT", `/admin/orgs/${s.dataset.org}`, { plan: s.value }); toast("Plan updated"); };
   });

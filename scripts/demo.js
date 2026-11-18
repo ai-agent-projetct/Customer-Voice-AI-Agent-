@@ -303,6 +303,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       console.log(`Dashboard: http://localhost:${port}/app  ·  log in as ${DEMO_LOGIN.email} / ${DEMO_LOGIN.password}`);
     });
     attachRealtime(server, db);
+    if (process.env.SIP_ENABLED === "1") {
+      const { startSipGateway } = await import("../server/sip/gateway.js");
+      startSipGateway(db).catch((err) => console.error("SIP gateway failed to start:", err.message));
+    }
   } else {
     console.log(`Log in at /app as ${DEMO_LOGIN.email} / ${DEMO_LOGIN.password}`);
   }

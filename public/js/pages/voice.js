@@ -65,7 +65,12 @@ route("voice", async () => {
     </div>
 
     <div class="panel">
-      <h2>2. Phone companies</h2>
+      <h2>2. Phone network</h2>
+      <div class="carrier-card network-card">
+        <div class="row-between"><strong>📡 VoiceDesk Network (our own)</strong>${v.network.enabled ? pill(v.network.canDial ? "Live" : "Incoming only", "") : pill("Not switched on", "grey")}</div>
+        <p class="small" style="margin:8px 0 0">VoiceDesk's own telephony: calls come straight from an Indian operator's SIP line into VoiceDesk, with no Twilio, Plivo, Vobiz or Exotel in between. Numbers on this network are given by the VoiceDesk team; nothing to set up here.${v.network.enabled && v.network.registered ? " Logged in to the operator ✅" : ""}</p>
+      </div>
+      <p class="muted small" style="margin-top:14px">Or bring your own account with another phone company:</p>
       <p class="muted small">Connect one or more. Each number uses its own company; outbound calls use your receptionist's number.</p>
       <div class="carrier-grid">${v.carriers.map((c) => `
         <form class="carrier-card" data-carrier="${h(c.id)}">
@@ -83,11 +88,11 @@ route("voice", async () => {
       ${v.numbers.length ? `<div class="table-wrap"><table><thead><tr><th>Number</th><th>Company</th><th>Answered by</th><th>Calls out</th><th>Paste this in your phone company</th><th></th></tr></thead><tbody>
         ${v.numbers.map((n) => `<tr data-id="${h(n.id)}">
           <td><b>${h(n.number)}</b>${n.label ? `<br><span class="muted small">${h(n.label)}</span>` : ""}</td>
-          <td>${h(v.carriers.find((c) => c.id === n.carrier)?.label || n.carrier)}</td>
+          <td>${n.carrier === "voicedesk" ? "VoiceDesk Network" : h(v.carriers.find((c) => c.id === n.carrier)?.label || n.carrier)}</td>
           <td><select data-agent>${opt("", "Nobody", n.agentId || "")}${v.agents.map((a) => opt(a.id, a.name, n.agentId || "")).join("")}</select></td>
           <td><input type="checkbox" data-out ${n.outbound ? "checked" : ""}></td>
-          <td class="url-cell"><span class="muted small">${n.streamUrl ? "Voicebot stream URL" : "Answer URL (POST)"}</span><code>${h(n.streamUrl || n.answerUrl)}</code><button type="button" class="btn small" data-copy="${h(n.streamUrl || n.answerUrl)}">Copy</button></td>
-          <td><button type="button" class="btn small" data-del>Remove</button></td></tr>`).join("")}
+          <td class="url-cell">${n.carrier === "voicedesk" ? `<span class="muted small">Connected directly: nothing to paste</span>` : `<span class="muted small">${n.streamUrl ? "Voicebot stream URL" : "Answer URL (POST)"}</span><code>${h(n.streamUrl || n.answerUrl)}</code><button type="button" class="btn small" data-copy="${h(n.streamUrl || n.answerUrl)}">Copy</button>`}</td>
+          <td>${n.carrier === "voicedesk" ? "" : `<button type="button" class="btn small" data-del>Remove</button>`}</td></tr>`).join("")}
       </tbody></table></div>` : `<p class="muted">No numbers yet. Buy a number from your phone company, then add it here.</p>`}
       <form id="add-number" class="form-grid" style="margin-top:14px">
         <label>Phone number<input name="number" placeholder="+91 80 4567 8901" required></label>
@@ -166,7 +171,8 @@ route("voice", async () => {
     const id = row.dataset.id;
     row.querySelector("[data-agent]").onchange = (ev) => api("PATCH", `/phone-voice/numbers/${id}`, { agentId: ev.target.value || null }).then(() => toast("Saved"), (err) => toast(err.message));
     row.querySelector("[data-out]").onchange = (ev) => api("PATCH", `/phone-voice/numbers/${id}`, { outbound: ev.target.checked }).then(() => toast("Saved"), (err) => toast(err.message));
-    row.querySelector("[data-del]").onclick = async () => {
+    const del = row.querySelector("[data-del]");
+    if (del) del.onclick = async () => {
       if (!confirm("Remove this number from VoiceDesk? Calls to it won't be answered by the AI.")) return;
       await api("DELETE", `/phone-voice/numbers/${id}`).catch((err) => toast(err.message));
       reload();
