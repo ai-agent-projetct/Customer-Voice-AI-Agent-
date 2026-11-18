@@ -204,6 +204,72 @@ export function seedDemo(target = file) {
   db.insert("orders", { orgId: org.id, agentId: agent.id, callId: null, ref: "A1B2C3", customerName: customers[3].name, phone: customers[3].phone, items: [{ name: "Hair spa", quantity: 2, price: 900 }], total: 1800, fulfilment: "pickup", address: "", notes: "Gift vouchers", status: "new", source: "phone", createdAt: at(0, "11:05") });
   db.insert("callbacks", { orgId: org.id, agentId: agent.id, phone: customers[6].phone, name: customers[6].name, reason: "Bridal package prices", goal: "", date: addDays(today, 1), time: "11:30", language: "hi-IN", status: "pending", attempts: 0, source: "phone" });
 
+  // ---------- AI workforce: a support colleague, chats on every channel, Brain, approvals ----------
+  db.update("agents", agent.id, { role: "receptionist", whatsappEnabled: true, instagramId: "17841400000000001", messengerPageId: "100000000000001", permissions: {}, escalationKeywords: ["lawyer", "consumer court"] });
+  const support = db.insert("agents", {
+    orgId: org.id, name: "Glow Support", role: "support", language: "en-IN", languages: ["hi-IN", "ta-IN"], greeting: "Hi! Glow Salon support here. How can I help?",
+    businessInfo: agent.businessInfo, instructions: "Help with orders of hair-care products, bookings and complaints. Refunds need the owner's approval.",
+    services: [{ name: "Hair serum", price: 650 }, { name: "Gift voucher", price: 1000 }], bookingEnabled: false, ordersEnabled: true, whatsappEnabled: false,
+    active: true, hours: structuredClone(DEFAULT_HOURS), timeZone: TZ, voiceGender: "female", speakingRate: "normal", voiceEngine: "standard", voiceMode: "standard",
+    greetings: {}, voices: {}, voice: "", faqs: [], departments: [], extractFields: [], permissions: { bookings: false }, escalationKeywords: ["lawyer"], publicId: "demo-glow-support",
+  });
+  const chat = (channel, person, lines, extra = {}) => {
+    const createdAt = extra.at || at(0, "10:00");
+    return db.insert("calls", {
+      orgId: org.id, agentId: extra.agent?.id ?? agent.id, agentName: extra.agent?.name ?? agent.name, channel, direction: "inbound", status: extra.status || "live",
+      customerId: person?.id ?? null, callerNumber: channel === "whatsapp" ? person.phone : undefined, externalId: channel === "whatsapp" ? undefined : `${channel.toUpperCase()}-${Math.floor(rand() * 1e9)}`,
+      customerName: extra.name || person?.name, language: "en-IN", messages: [], summary: "", durationSec: 0, greeting: lines[0][1], createdAt,
+      transcript: lines.map(([role, text, by], i) => ({ role, text, ...(by && { by }), at: new Date(Date.parse(createdAt) + i * 60e3).toISOString() })),
+      ...extra.fields,
+    });
+  };
+  chat("whatsapp", customers[2], [
+    ["agent", "Hi! I'm the AI assistant for Glow Salon (Demo). How can I help you today?"],
+    ["caller", "Do you do keratin treatment? How much?"],
+    ["agent", "We don't have keratin on our price list yet, so I've noted your question for the owner. Would you like a hair spa (900 rupees) instead?"],
+    ["caller", "I'd like to speak to someone please"],
+    ["agent", "Sure! A member of the Glow Salon (Demo) team will reply here shortly."],
+  ], { at: at(0, "11:40"), fields: { humanMode: true, humanRequestedAt: at(0, "11:44") } });
+  chat("instagram", null, [
+    ["agent", "Hi! I'm the AI assistant for Glow Salon (Demo). How can I help you today?"],
+    ["caller", "Saw your bridal reel 😍 do you do trials?"],
+    ["agent", "Yes! Bridal consultations are free and include a trial plan. Shall I book you a consultation this week?"],
+    ["caller", "Saturday morning?"],
+    ["agent", "Saturday I have 10 AM and 11 AM free. Which works for you?"],
+  ], { name: "@nila.designs", at: at(0, "12:10") });
+  chat("messenger", customers[8], [
+    ["agent", "Hi! I'm the AI assistant for Glow Salon (Demo). How can I help you today?"],
+    ["caller", "My serum order hasn't arrived, it's been a week"],
+    ["agent", "Sorry about that! Glow Support will help you from here."],
+    ["agent", "Hi Farhan, this is Glow Support. Your order A1B2C3 shipped on Monday with DTDC; tracking says out for delivery today."],
+  ], { at: at(0, "09:15"), agent: support, fields: { handoffs: [{ from: agent.name, to: support.name, summary: "Serum order delayed", at: at(0, "09:16") }] } });
+  chat("widget", null, [
+    ["agent", "Hi! I'm the AI assistant for Glow Salon (Demo). How can I help you today?"],
+    ["caller", "is there parking?"],
+    ["agent", "Yes, free parking for six cars right behind the salon."],
+  ], { name: "Website visitor", at: at(0, "13:02") });
+
+  db.insert("knowledge", { orgId: org.id, title: "Cancellation & refund policy", visibility: "public", source: "upload", addedBy: "Asha Kumar", createdAt: at(10, "10:00"),
+    content: "Appointments can be cancelled or moved free of charge up to 4 hours before. Late cancellations are charged 50%. Products can be returned within 7 days if unopened. Damaged products are replaced or refunded after the team checks a photo. Gift vouchers are valid for 12 months and cannot be refunded." });
+  db.insert("knowledge", { orgId: org.id, title: "Bridal packages", visibility: "public", source: "upload", addedBy: "Asha Kumar", createdAt: at(9, "10:00"),
+    content: "Bridal consultation is free and includes a trial plan. Bridal makeup with hair styling starts at 15,000 rupees; with saree draping and pre-bridal facials 25,000 rupees. We travel to the venue within Chennai for an extra 2,000 rupees. Book at least 4 weeks ahead in wedding season." });
+  db.insert("knowledge", { orgId: org.id, title: "Team meeting notes (Monday)", visibility: "internal", source: "note", addedBy: "Asha Kumar", createdAt: at(2, "18:00"),
+    content: "Deepa is on leave 20 to 24 November, move her bridal trials to Kavitha. Hair colour supplier is Lakme Distributors, our margin is 32 percent, next order due on the 5th. Diwali offer brought 18 bookings; repeat it for Christmas. Customers keep asking for keratin: get prices by Friday." });
+
+  const refundOrder = db.insert("orders", { orgId: org.id, agentId: support.id, callId: null, ref: "D4E5F6", customerName: customers[8].name, phone: customers[8].phone, items: [{ name: "Hair serum", quantity: 1, price: 650 }], total: 650, fulfilment: "delivery", address: "Anna Nagar", notes: "", status: "delivered", source: "api", createdAt: at(6, "10:00") });
+  db.insert("approvals", { orgId: org.id, agentId: support.id, callId: null, kind: "refund", orderId: refundOrder.id, ref: refundOrder.ref, amount: 650, reason: "Bottle arrived leaking; customer sent a photo on Messenger.", phone: customers[8].phone, status: "pending", createdAt: at(0, "09:30") });
+  db.insert("orders", { orgId: org.id, agentId: null, callId: null, ref: "COD771", customerName: customers[5].name, phone: customers[5].phone, items: [{ name: "Gift voucher", quantity: 2, price: 1000 }], total: 2000, fulfilment: "delivery", address: "T. Nagar", notes: "", payment: "cod", status: "awaiting_confirmation", consent: true, source: "api", createdAt: at(0, "08:50") });
+  db.insert("carts", { orgId: org.id, customerName: customers[9].name, phone: customers[9].phone, items: [{ name: "Hair serum", quantity: 2, price: 650 }], total: 1300, checkoutUrl: "https://shop.example/checkout/demo", consent: true, status: "abandoned", createdAt: at(0, "07:30") });
+  db.update("orgs", org.id, { automations: { codConfirm: { enabled: true, messageAfterMinutes: 5, callAfterMinutes: 120 }, abandonedCart: { enabled: true, messageAfterMinutes: 30, callAfterMinutes: 240 }, leadFollowUp: { enabled: true, steps: [{ afterHours: 0, channel: "whatsapp" }, { afterHours: 24, channel: "call" }, { afterHours: 72, channel: "whatsapp" }] } } });
+  for (const [who, tool, input, result, h] of [
+    [agent, "book_appointment", { service: "Haircut", date: addDays(today, 1), time: "17:00" }, "Booked. Reference 7F3A2C.", "09:05"],
+    [agent, "hand_off", { to: support.name }, "Serum order delayed", "09:16"],
+    [support, "track_order", { reference: "A1B2C3" }, "Order A1B2C3: 2 × Hair spa, ₹1800, status shipped", "09:17"],
+    [support, "request_refund", { reference: "D4E5F6", amount: 650 }, "Refund request sent to the team for approval.", "09:30"],
+    [agent, "note_unanswered_question", { question: "Do you do keratin treatment?" }, "Noted for the owner.", "11:41"],
+    [agent, "transfer_to_human", { reason: "Customer asked for a person" }, "Handed to the team.", "11:44"],
+  ]) db.insert("activity", { orgId: org.id, agentId: who.id, agentName: who.name, callId: null, channel: "whatsapp", tool, input: JSON.stringify(input), result, createdAt: at(0, h) });
+
   // Questions waiting to be taught.
   for (const [question, count] of [["Do you do home visits for brides?", 4], ["Can I pay with UPI?", 3], ["Do you have a kids' haircut price?", 2]]) {
     db.insert("questions", { orgId: org.id, agentId: agent.id, callId: null, question, status: "open", count, answer: "" });

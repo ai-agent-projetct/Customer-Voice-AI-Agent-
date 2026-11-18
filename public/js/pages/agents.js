@@ -31,12 +31,12 @@ route("agents", async () => {
   });
 });
 
-const TABS = ["Basics", "Languages & voice", "Knowledge", "Services & hours", "Phone & website", "Test Lab"];
+const TABS = ["Basics", "Languages & voice", "Knowledge", "Services & hours", "Channels & job", "Test Lab"];
 const LAB = 5;
 
 route("agent", async (id) => {
   const [agentId, tab] = id.split("/").length > 1 ? id.split("/") : [id, location.hash.split("/")[2]];
-  const a = await api("GET", `/agents/${agentId}`);
+  const [a, team] = await Promise.all([api("GET", `/agents/${agentId}`), api("GET", "/team")]);
   const { languages } = state.catalog;
   const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const startTab = tab === "lab" ? LAB : tab === "languages" ? 1 : 0;
@@ -119,6 +119,18 @@ route("agent", async (id) => {
           <label class="check"><input type="checkbox" name="whatsappEnabled" ${a.whatsappEnabled ? "checked" : ""}> Answer WhatsApp messages with this receptionist</label>
           <label class="check"><input type="checkbox" name="recordCalls" ${a.recordCalls ? "checked" : ""}> Record calls <span class="hint">— tell callers in your greeting that calls are recorded</span></label>
           <label class="check"><input type="checkbox" name="ordersEnabled" ${a.ordersEnabled ? "checked" : ""}> Take orders by phone for the items in Services & hours</label>
+          <hr>
+          <div class="row">
+            <label>Job <span class="hint">— what this AI employee is for</span><select name="role">${Object.entries(team.roles).map(([k, r]) => `<option value="${k}" ${(a.role || "receptionist") === k ? "selected" : ""}>${h(r.label)}</option>`).join("")}</select></label>
+            <label>Escalation words <span class="hint">— always go to a person (comma separated)</span><input name="escalationKeywords" value="${h((a.escalationKeywords || []).join(", "))}" placeholder="lawyer, police, fraud"></label>
+          </div>
+          <div class="label">Allowed to <span class="hint">— untick what this AI employee must never do</span></div>
+          <div class="perm-grid">${Object.entries(team.permissions).map(([k, label]) => `<label class="check small"><input type="checkbox" name="perm" value="${k}" ${a.permissions?.[k] === false ? "" : "checked"}> ${h(label)}</label>`).join("")}</div>
+          <div class="row" style="margin-top:14px">
+            <label>Instagram account ID <span class="hint">— answers Instagram DMs</span><input name="instagramId" value="${h(a.instagramId || "")}" placeholder="17841400000000000"></label>
+            <label>Facebook Page ID <span class="hint">— answers Messenger</span><input name="messengerPageId" value="${h(a.messengerPageId || "")}" placeholder="100000000000000"></label>
+          </div>
+          <p class="muted small">Connect Meta once under <a href="#settings">Settings → Channels</a>.</p>
           <div class="label" style="margin-top:14px">Teams to transfer to <span class="hint">— "Billing", "Bridal desk"… the receptionist picks the right one</span></div>
           <div id="departments"></div>
           <button type="button" class="btn small" id="add-dept">+ Add team</button>
@@ -287,6 +299,11 @@ route("agent", async (id) => {
     transferNumber: form.transferNumber.value.trim(),
     widgetEnabled: form.widgetEnabled.checked,
     voiceMode: form.voiceMode.value,
+    role: form.role.value,
+    escalationKeywords: form.escalationKeywords.value.split(",").map((k) => k.trim()).filter(Boolean),
+    permissions: Object.fromEntries([...form.querySelectorAll("[name=perm]")].map((c) => [c.value, c.checked])),
+    instagramId: form.instagramId.value.trim(),
+    messengerPageId: form.messengerPageId.value.trim(),
     whatsappEnabled: form.whatsappEnabled.checked,
     whatsappNumber: form.whatsappNumber.value.trim(),
     recordCalls: form.recordCalls.checked,

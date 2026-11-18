@@ -91,6 +91,7 @@ async function campaignDetail(id) {
 // ---------- settings ----------
 route("settings", async () => {
   await refreshMe();
+  const ch = await api("GET", "/channels");
   const o = state.org, u = state.usage;
   const base = location.origin;
   shell("settings", `
@@ -116,6 +117,13 @@ route("settings", async () => {
           ${o.plan === p.id ? pill("Current", "") : `<a class="btn small" href="mailto:sales@example.com?subject=Upgrade%20${encodeURIComponent(o.name)}%20to%20${p.label}">Upgrade</a>`}</div>`).join("")}</div>
       </div>
     </div>
+    <form class="panel" id="channels">
+      <h2>Channels: Instagram & Messenger</h2>
+      <p class="muted small">${ch.metaConnected ? `✅ Connected (token ending ${h(ch.metaTokenLast4 || "from server")}).` : "Not connected yet."} In your Meta developer app, set the webhook to <code>${h(base)}/meta/webhook</code>, subscribe to <b>messages</b>, and paste a Page access token here. Then add the Instagram account ID / Page ID on each AI employee.</p>
+      <label>Page access token<input name="metaPageToken" type="password" autocomplete="off" placeholder="${ch.metaConnected ? "•••••• (saved: paste a new one to replace)" : "EAAG…"}"></label>
+      <p class="muted small">Server settings: verify token ${ch.verifyTokenSet ? "✅" : "❌ set META_VERIFY_TOKEN"} · app secret ${ch.appSecretSet ? "✅" : "❌ set META_APP_SECRET"}</p>
+      <div class="save-bar"><button class="btn btn-primary">Save</button></div>
+    </form>
     <div class="panel">
       <h2>Phone setup</h2>
       <ol class="steps">
@@ -126,6 +134,12 @@ route("settings", async () => {
         <li><b>Keep your existing number:</b> forward it to the Twilio number when busy, unanswered or after hours.</li>
       </ol>
     </div>`);
+  document.getElementById("channels").onsubmit = async (e) => {
+    e.preventDefault();
+    const token = e.target.metaPageToken.value.trim();
+    if (!token) return toast("Paste a token first");
+    try { await api("PUT", "/channels", { metaPageToken: token }); toast("Meta connected"); location.reload(); } catch (err) { toast(err.message); }
+  };
   const form = document.getElementById("settings");
   form.onsubmit = async (e) => {
     e.preventDefault();

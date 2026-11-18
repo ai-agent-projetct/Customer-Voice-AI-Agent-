@@ -31,6 +31,7 @@ the build environment, so this relies on search results of their own pages and d
 | **SharyX** | AI receptionist, appointment booking, order-taking (OrderAI), call quality scoring (VQI), workflow actions, scheduled callbacks |
 | **Tata Smartflo** | Cloud telephony: virtual numbers, multi-level IVR, call recording, click-to-call, auto dialer, number masking |
 | **Deepgram** | Speech engine: streaming speech-to-text and text-to-speech, voice agent API with barge-in and mid-call language switching |
+| **TwistGenAI** | Managed "AI Employees" on WhatsApp, Instagram DM and Messenger (no voice product): sales (COD confirmation, abandoned carts, lead follow-up), support (orders, refunds), operations; Agentic OS (hand-offs, shared memory, permissions, audit logs); Company Brain (knowledge vault); workflow automation; custom CRM. Read from its public Home, Services and Pricing pages, November 2026. |
 
 ## Feature map
 
@@ -67,6 +68,21 @@ the build environment, so this relies on search results of their own pages and d
 | ROI dashboard in rupees, daily owner brief | (none found) | ✅ | B, C |
 | Plans, usage limits, admin console | all (as businesses) | ✅ | B, C |
 | Data export and erasure | (compliance pages) | ✅ | B |
+| **Instagram DM + Facebook Messenger on the same AI** | TwistGenAI, Omnidim | ✅ Meta webhook with signature check | B (signed webhook test); not yet on a live Meta app |
+| **One customer across channels** (shared memory) | TwistGenAI | ✅ linked by phone; recent conversations in the AI's briefing | B |
+| **Human takeover inbox** (AI steps aside, team replies on the customer's channel) | TwistGenAI, Smartflo | ✅ Inbox | B, C |
+| **AI employee roles** (receptionist, sales, support, operations) | TwistGenAI | ✅ | B, C |
+| **Per-employee permissions and escalation rules** | TwistGenAI (guardrails) | ✅ | B, C |
+| **Hand-offs between AI employees** (Sales → Support) | TwistGenAI (Agentic OS) | ✅ fresh history + briefing | B, C |
+| **Activity log of every AI action** | TwistGenAI (audit logs) | ✅ | B, C |
+| **Refunds need owner approval** | TwistGenAI (escalation) | ✅ Approvals; customer told the decision | B, C |
+| **Order tracking for customers** (own orders only) | TwistGenAI | ✅ | B |
+| **COD order confirmation** (WhatsApp, then AI call) | TwistGenAI | ✅ automation + `POST /api/v1/orders` | B, C |
+| **Abandoned cart recovery** | TwistGenAI | ✅ automation + `POST /api/v1/carts` | B, C |
+| **Lead follow-up sequences** until won/lost | TwistGenAI | ✅ automation | B, C |
+| **Company Brain** (public/internal knowledge vault, call summaries, ask with sources, ask from WhatsApp) | TwistGenAI | ✅ | B, C (keyword search; AI answers need a key) |
+| GTM multi-agent team (research, content, marketing, engineering over Telegram) | TwistGenAI | ❌ outside VoiceDesk's focus on customer conversations | n/a |
+| Custom CRM / ERP builds | TwistGenAI | ◐ customers, leads, orders and bookings built in; no ERP | n/a |
 | Visual drag-and-drop flow builder | Omnidim, Edesy | ❌ by design: owners describe the business in plain language instead | n/a |
 | Human agent assist and coaching | ConvoZen | ❌ VoiceDesk targets shops without call-centre staff | n/a |
 | Android / iOS app | Smartflo | ❌ the dashboard works on a phone browser; no store app | C (mobile layout) |

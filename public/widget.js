@@ -29,7 +29,7 @@
       header select option { color: #10201c; }
       .log { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 8px; background: #f7f6f2; }
       .m { max-width: 85%; padding: 8px 12px; border-radius: 14px; font-size: 14px; line-height: 1.4; }
-      .a { background: #fff; border: 1px solid #e6e2d8; } .u { background: ${color}; color: #fff; align-self: flex-end; } .s { align-self: center; font-size: 12px; color: #6b7c77; }
+      .a { background: #fff; border: 1px solid #e6e2d8; } .h { background: #fff7e8; border: 1px solid #f5d9a8; } .u { background: ${color}; color: #fff; align-self: flex-end; } .s { align-self: center; font-size: 12px; color: #6b7c77; }
       form { display: flex; gap: 6px; padding: 10px; border-top: 1px solid #e6e2d8; }
       input { flex: 1; border: 1px solid #e6e2d8; border-radius: 10px; padding: 10px; font-size: 14px; }
       .mic, .send { border: 0; border-radius: 10px; background: ${color}; color: #fff; padding: 0 12px; cursor: pointer; font-weight: 700; }
@@ -77,6 +77,17 @@
   }
 
   let info = null;
+  let seen = 0; // messages already shown, for polling team replies
+
+  // When a person from the business takes over, their replies arrive here.
+  setInterval(async () => {
+    if (!session || !$(".panel").classList.contains("open") || busy) return;
+    try {
+      const r = await post(`/sessions/${session.sessionId}/messages`, { secret: session.secret, after: seen });
+      for (const m of r.messages) add(m.role === "human" ? "h" : "a", m.role === "human" ? `${m.by}: ${m.text}` : m.text);
+      seen = r.count;
+    } catch {}
+  }, 4000);
   let chosen = ""; // language picked in the header menu ("" = the business's main language)
 
   async function open() {
@@ -107,6 +118,7 @@
       session = await post(`/agents/${encodeURIComponent(agentId)}/sessions`, chosen ? { language: chosen } : {});
       lang = session.language || lang;
       add("a", session.greeting);
+      seen = 1;
       speak(session.greeting);
     } catch (e) {
       add("s", e.message);
@@ -128,7 +140,8 @@
         const select = $(".langs");
         if (!select.hidden) select.value = lang;
       }
-      add("a", r.reply);
+      if (r.reply) add("a", r.reply);
+      seen = r.count ?? seen;
       speak(r.reply);
       if (r.transfer) add("s", `Call us: ${r.transfer}`);
       if (r.ended) {

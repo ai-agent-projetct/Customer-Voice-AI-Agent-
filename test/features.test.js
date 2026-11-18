@@ -354,6 +354,9 @@ test("the demo seed builds a believable business", async () => {
   const ins = insights(demo, org);
   assert.ok(ins.calls > 20 && ins.bookings > 5 && ins.estimatedRevenue > 0, JSON.stringify(ins));
   assert.ok(ins.languages["hi-IN"] && ins.languages["ta-IN"] && ins.languages["en-IN"]);
-  assert.equal(demo.find("calls", (c) => c.status === "live").length, 1);
+  assert.equal(demo.find("calls", (c) => c.status === "live" && c.channel === "phone").length, 1);
+  assert.deepEqual(demo.find("calls", (c) => c.status === "live" && c.channel !== "phone").map((c) => c.channel).sort(), ["instagram", "messenger", "whatsapp", "widget"]);
+  assert.equal(demo.find("approvals", (a) => a.status === "pending").length, 1);
+  assert.equal(demo.find("agents", () => true).length, 2);
   assert.equal(demo.find("questions", (q) => q.status === "open").length, 3);
 });

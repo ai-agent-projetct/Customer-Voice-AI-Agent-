@@ -270,3 +270,17 @@ test("channel settings never send the Meta token back to the browser", async () 
   const me = (await api(token, "GET", "/me")).body;
   assert.equal(me.org.metaPageToken, undefined);
 });
+
+test("chats on every channel stay open through a day of silence; phone calls close after 45 minutes", async () => {
+  const { closeStaleCalls } = await import("../server/scheduler.js");
+  const { agent } = await business();
+  const old = new Date(Date.now() - 3 * 3600e3).toISOString();
+  const mk = (channel) => db.insert("calls", { orgId: agent.orgId, agentId: agent.id, channel, status: "live", transcript: [{ role: "caller", text: "hi", at: old }], messages: [], createdAt: old });
+  const chats = ["whatsapp", "instagram", "messenger", "widget"].map(mk);
+  const phoneCall = mk("phone");
+  closeStaleCalls(db);
+  assert.deepEqual(chats.map((c) => db.get("calls", c.id).status), ["live", "live", "live", "live"]);
+  assert.equal(db.get("calls", phoneCall.id).status, "ended");
+  closeStaleCalls(db, new Date(Date.now() + 25 * 3600e3));
+  assert.equal(db.get("calls", chats[1].id).status, "ended");
+});

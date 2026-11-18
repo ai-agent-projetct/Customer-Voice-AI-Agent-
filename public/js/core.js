@@ -69,7 +69,7 @@ export function route(name, view) {
 export async function router() {
   cleanup.forEach((fn) => fn());
   cleanup = [];
-  const [name, param] = location.hash.slice(1).split("/");
+  const [name, param] = location.hash.slice(1).split("?")[0].split("/");
   if (!state.token && !["login", "signup"].includes(name)) return (location.hash = "#login");
   if (state.token && (!name || ["login", "signup"].includes(name))) return (location.hash = "#overview");
   state.catalog ??= await api("GET", "/catalog");
@@ -97,11 +97,16 @@ export function signOut() {
 
 const NAV = [
   ["overview", "Overview", "M3 12l9-8 9 8M5 10v10h14V10"],
+  ["team", "AI workforce", "M9 7a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM3 21v-2a6 6 0 0 1 12 0v2M17 11l2 2 4-4"],
+  ["inbox", "Inbox", "M3 13h5l2 3h4l2-3h5M5 5h14l2 8v6H3v-6z", "inbox"],
   ["live", "Live calls", "M12 12m-3 0a3 3 0 1 0 6 0a3 3 0 1 0-6 0M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14", "live"],
   ["agents", "Receptionists", "M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5 11a7 7 0 0 0 14 0M12 18v3"],
   ["calls", "Calls", "M5 4h4l2 5-3 2a11 11 0 0 0 5 5l2-3 5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"],
   ["questions", "Teach it", "M9 9a3 3 0 1 1 4 2.8c-.6.3-1 .9-1 1.6V14M12 17h.01M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18", "questions"],
   ["quality", "Quality", "M12 3l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16.6 6.6 19.5l1.2-6L3.3 9.3l6.1-.7z"],
+  ["brain", "Company Brain", "M12 4a4 4 0 0 0-4 4 3 3 0 0 0-3 5 3 3 0 0 0 3 5 4 4 0 0 0 8 0 3 3 0 0 0 3-5 3 3 0 0 0-3-5 4 4 0 0 0-4-4zM12 4v16"],
+  ["automations", "Automations", "M13 2L4 14h7l-1 8 9-12h-7z"],
+  ["activity", "Activity & approvals", "M4 6h16M4 12h10M4 18h7M17 15l2 2 4-4", "approvals"],
   ["appointments", "Bookings", "M4 6h16v14H4zM4 10h16M9 3v4M15 3v4"],
   ["orders", "Orders", "M6 7h12l-1 13H7zM9 7a3 3 0 0 1 6 0"],
   ["scheduled", "Scheduled calls", "M12 7v5l3 2M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18"],
@@ -132,8 +137,13 @@ export function shell(active, content) {
 export async function refreshBadges() {
   if (!state.token) return;
   try {
-    const [live, questions] = await Promise.all([api("GET", "/calls?status=live"), api("GET", "/questions")]);
-    state.badges = { live: live.length, questions: questions.length };
+    const [live, questions, inbox, approvals] = await Promise.all([api("GET", "/calls?status=live"), api("GET", "/questions"), api("GET", "/inbox?filter=open"), api("GET", "/approvals")]);
+    state.badges = {
+      live: live.filter((c) => !["whatsapp", "instagram", "messenger", "widget"].includes(c.channel)).length,
+      questions: questions.length,
+      inbox: inbox.filter((c) => c.unread || c.needsPerson).length,
+      approvals: approvals.filter((a) => a.status === "pending").length,
+    };
   } catch {}
 }
 
