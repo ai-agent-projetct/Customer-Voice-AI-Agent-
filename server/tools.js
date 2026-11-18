@@ -7,6 +7,7 @@ import { findCustomer, upsertCustomer } from "./customers.js";
 import { agentLanguages, lang } from "./languages.js";
 import { notifyOwner, queueMessage } from "./messaging.js";
 import { emitEvent } from "./webhooks.js";
+import { searchBrain } from "./brain.js";
 import { localParts, samePhone, toHHMM, toMinutes, todayIn } from "./util.js";
 
 export { todayIn };
@@ -48,7 +49,7 @@ function tool(name, description, properties) {
 }
 
 // Tool definitions sent to Claude. `strict: true` guarantees arguments match the schema.
-export function toolDefinitions(agent, org, call) {
+export function toolDefinitions(agent, org, call, db = null) {
   const tools = [];
   if (agent.bookingEnabled) {
     tools.push(
@@ -113,8 +114,9 @@ export function toolDefinitions(agent, org, call) {
       department: { type: "string", enum: [...departments.map((d) => d.name), "General"], description: "Which team should take the call" },
       reason: str(),
     }));
-  } else if (agent.transferNumber || org?.ownerPhone) {
-    tools.push(tool("transfer_to_human", "Transfer the call to a staff member when the caller insists on a person or you cannot help.", { reason: str() }));
+  } else if (agent.transferNumber || org?.ownerPhone || ["whatsapp", "instagram", "messenger", "widget"].includes(call?.channel)) {
+    // In a chat, "a person" means the team takes over this conversation from the Inbox.
+    tools.push(tool("transfer_to_human", "Hand the customer to a person on the team when they insist on a person or you cannot help.", { reason: str() }));
   }
   if (call?.channel !== "simulation") {
     tools.push(tool("schedule_callback", "The caller asked to be called back later. Schedule the call for the time they want (calls are only made between 9am and 9pm).", {
@@ -130,9 +132,48 @@ export function toolDefinitions(agent, org, call) {
       notes: str(),
     }));
   }
-  tools.push(tool("end_call", "Hang up after you have said goodbye and the caller has nothing else they need.", { summary: str("One-sentence summary of the call") }));
-  return tools;
+  if (db && agent.orgId && db.find("knowledge", (d) => d.orgId === agent.orgId && d.visibility === "public").length) {
+    tools.push(tool("search_knowledge", "Search the business's knowledge vault (policies, price lists, product details) when the answer isn't in your instructions.", { query: str("What to look up, in a few words") }));
+  }
+  if (db && agent.orgId && db.find("orders", (o) => o.orgId === agent.orgId).length) {
+    tools.push(
+      tool("track_order", "Look up the status of the customer's order.", { reference: str("Order reference, or empty"), phone: str("Phone number the order was placed with") }),
+      tool("confirm_order", "Record the customer's answer when confirming a cash-on-delivery order: confirm or cancel.", { reference: str(), decision: { type: "string", enum: ["confirm", "cancel"] }, note: str() }),
+      tool("request_refund", "Ask the team to approve a refund or replacement. You can't approve refunds yourself: tell the customer the team will confirm.", { reference: str(), amount: { type: "integer", description: "Rupees" }, reason: str() }),
+    );
+  }
+  const colleagues = db && agent.orgId ? db.find("agents", (a) => a.orgId === agent.orgId && a.active && a.id !== agent.id) : [];
+  if (colleagues.length && call?.channel !== "simulation") {
+    tools.push(tool("hand_off", "Pass this conversation to a colleague AI employee whose job fits better (for example Sales to Support). They see everything said so far.", {
+      colleague: { type: "string", enum: colleagues.map((c) => c.name), description: colleagues.map((c) => `${c.name}: ${ROLES[c.role]?.label ?? "assistant"}`).join("; ") },
+      summary: str("What the customer needs, in one sentence"),
+    }));
+  }
+  tools.push(tool("end_call", "End the conversation after you have said goodbye and the customer has nothing else they need.", { summary: str("One-sentence summary of the conversation") }));
+  // Permissions: the owner decides which kinds of action each AI employee may take.
+  const blocked = new Set(Object.entries(agent.permissions || {}).filter(([, on]) => on === false).flatMap(([group]) => PERMISSIONS[group]?.tools ?? []));
+  return tools.filter((t) => !blocked.has(t.name));
 }
+
+/** Kinds of action an AI employee can be allowed or forbidden to take. */
+export const PERMISSIONS = {
+  bookings: { label: "Book, move and cancel appointments", tools: ["check_availability", "book_appointment", "find_appointments", "cancel_appointment", "reschedule_appointment"] },
+  orders: { label: "Take, track and confirm orders", tools: ["place_order", "track_order", "confirm_order"] },
+  refunds: { label: "Request refunds (always needs your approval)", tools: ["request_refund"] },
+  messages: { label: "Send WhatsApp / SMS messages", tools: ["send_info_message"] },
+  callbacks: { label: "Schedule callbacks", tools: ["schedule_callback"] },
+  transfers: { label: "Transfer to a person", tools: ["transfer_to_human"] },
+  handoffs: { label: "Hand off to other AI employees", tools: ["hand_off"] },
+  knowledge: { label: "Search the Company Brain", tools: ["search_knowledge"] },
+};
+
+/** Job descriptions for AI employees. */
+export const ROLES = {
+  receptionist: { label: "Receptionist", job: "Answer enquiries, book appointments and take messages." },
+  sales: { label: "Sales development", job: "Qualify leads, follow up, confirm cash-on-delivery orders and recover abandoned carts. Be persuasive but never pushy, and always honest." },
+  support: { label: "Customer support", job: "Resolve questions, track orders and handle complaints. Refunds and replacements go to the team for approval." },
+  operations: { label: "Operations", job: "Confirm orders and appointments, chase missing details and flag problems to the team early." },
+};
 
 // On a phone call we only reveal bookings made from the caller's own number.
 // On web/widget chats the caller must give both the phone and the name used.
@@ -155,7 +196,19 @@ function servicePrice(agent, name) {
 }
 
 /** Runs one tool call. Returns { result: text for Claude, action?: call control }. */
+/** Runs one tool call and records it in the activity log (every action an AI employee takes is auditable). */
 export function runTool(db, agent, call, name, input) {
+  const out = runToolInner(db, agent, call, name, input);
+  if (call?.channel !== "simulation" && agent?.orgId) {
+    db.insert("activity", {
+      orgId: agent.orgId, agentId: agent.id, agentName: agent.name, callId: call?.id ?? null, channel: call?.channel ?? null,
+      tool: name, input: JSON.stringify(input ?? {}).slice(0, 400), result: String(out.result).slice(0, 300),
+    });
+  }
+  return out;
+}
+
+function runToolInner(db, agent, call, name, input) {
   const org = db.get("orgs", agent.orgId);
   const today = todayIn(agent.timeZone);
   const sendConfirmation = (appt, verb) =>
@@ -294,6 +347,40 @@ export function runTool(db, agent, call, name, input) {
       db.insert("callbacks", { orgId: agent.orgId, agentId: agent.id, callId: call.id, phone, date: input.date, time: input.time, reason: input.reason, language: call.language ?? agent.language, status: "pending", source: call.channel });
       emitEvent(db, agent.orgId, "callback.scheduled", { phone, date: input.date, time: input.time, reason: input.reason });
       return { result: `Callback scheduled for ${input.date} at ${input.time}. Confirm the time with the caller.` };
+    }
+    case "search_knowledge": {
+      const hits = searchBrain(db, agent.orgId, input.query, { limit: 3 });
+      if (!hits.length) return { result: "Nothing found in the knowledge vault. Say you don't know and offer to take a message." };
+      return { result: hits.map((h) => `(${h.title}) ${h.text}`).join("\n\n").slice(0, 3000) };
+    }
+    case "track_order":
+    case "confirm_order":
+    case "request_refund": {
+      const ref = String(input.reference || "").toUpperCase().replace(/[^A-Z0-9-]/g, "");
+      const phone = call.callerNumber || input.phone;
+      // Customers only ever see their own orders: matched by the phone they're calling or chatting from.
+      const theirs = db.find("orders", (o) => o.orgId === agent.orgId && samePhone(o.phone, phone) && (!ref || o.ref === ref));
+      if (!theirs.length) return { result: "No order found for this customer. Ask for the order reference and the phone number used." };
+      if (name === "track_order") {
+        return { result: theirs.slice(-3).map((o) => `Order ${o.ref}: ${o.items.map((i) => `${i.quantity} × ${i.name}`).join(", ")}, ₹${o.total}, status ${o.status.replace(/_/g, " ")}${o.tracking ? `, tracking ${o.tracking}` : ""}`).join("; ") };
+      }
+      const order = theirs.at(-1);
+      if (name === "confirm_order") {
+        if (order.status !== "awaiting_confirmation") return { result: `Order ${order.ref} is already ${order.status.replace(/_/g, " ")}.` };
+        const status = input.decision === "confirm" ? "confirmed" : "cancelled";
+        db.update("orders", order.id, { status, confirmedVia: call.channel, confirmationNote: input.note });
+        emitEvent(db, agent.orgId, "order.placed", { ...order, status });
+        return { result: status === "confirmed" ? `Order ${order.ref} confirmed. Thank the customer and give the delivery estimate if known.` : `Order ${order.ref} cancelled as the customer asked.` };
+      }
+      const amount = Math.max(0, Math.min(Number(input.amount) || order.total, order.total));
+      const approval = db.insert("approvals", { orgId: agent.orgId, agentId: agent.id, callId: call.id, kind: "refund", orderId: order.id, ref: order.ref, amount, reason: input.reason, phone, status: "pending" });
+      notifyOwner(db, agent.orgId, { kind: "approval", title: `Refund request ₹${amount} (order ${order.ref})`, body: `${input.reason}\nApprove or decline in the dashboard.`, callId: call.id, urgent: true });
+      return { result: `Refund request ${approval.id.slice(0, 6).toUpperCase()} sent to the team for approval. Tell the customer they'll hear back soon; don't promise the refund.` };
+    }
+    case "hand_off": {
+      const to = db.find("agents", (a) => a.orgId === agent.orgId && a.active && a.name === input.colleague && a.id !== agent.id)[0];
+      if (!to) return { result: "That colleague isn't available. Carry on yourself." };
+      return { result: `Handing over to ${to.name}. Tell the customer in one short sentence that ${to.name} will help them now.`, action: { type: "handoff", agentId: to.id, summary: input.summary } };
     }
     case "place_order": {
       const menu = normalizeServices(agent.services);

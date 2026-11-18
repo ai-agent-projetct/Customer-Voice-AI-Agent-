@@ -24,6 +24,10 @@ const EMPTY = () => ({
   apiKeys: [],
   webhooks: [],
   deliveries: [],
+  knowledge: [],
+  activity: [],
+  approvals: [],
+  carts: [],
 });
 
 export class Store {

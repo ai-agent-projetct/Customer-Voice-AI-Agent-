@@ -61,7 +61,8 @@ export function accountRouter(db, auth) {
       loginLimit(email);
       return res.status(401).json({ error: "Wrong email or password." });
     }
-    res.json({ token: createSession(db, user.id), user: publicUser(user), org: db.get("orgs", user.orgId) });
+    const { metaPageToken, ...org } = db.get("orgs", user.orgId);
+    res.json({ token: createSession(db, user.id), user: publicUser(user), org });
   });
 
   r.post("/auth/logout", auth, (req, res) => {
@@ -71,7 +72,8 @@ export function accountRouter(db, auth) {
   });
 
   r.get("/me", auth, (req, res) => {
-    res.json({ user: { ...publicUser(req.user), isAdmin: isAdmin(req.user) }, org: req.org, usage: usage(db, req.org) });
+    const { metaPageToken, ...org } = req.org;
+    res.json({ user: { ...publicUser(req.user), isAdmin: isAdmin(req.user) }, org, usage: usage(db, req.org) });
   });
 
   r.put("/settings", auth, (req, res) => {
@@ -100,7 +102,8 @@ export function accountRouter(db, auth) {
       }
       changes.timeZone = b.timeZone;
     }
-    res.json(db.update("orgs", req.org.id, changes));
+    const { metaPageToken, ...org } = db.update("orgs", req.org.id, changes);
+    res.json(org);
   });
 
   return r;

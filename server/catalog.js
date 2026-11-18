@@ -72,6 +72,38 @@ export const TEMPLATES = [
     },
   },
   {
+    id: "sales",
+    label: "Sales follow-up (e-commerce)",
+    agent: {
+      name: "Sales Assistant",
+      role: "sales",
+      greeting: "Hi! Thanks for reaching out. What can I help you find today?",
+      businessInfo: "",
+      instructions:
+        "Help customers choose and order. Confirm cash-on-delivery orders politely, remind people about items left in their cart, and follow up on enquiries. Never pressure anyone, and stop if they say no.",
+      services: [],
+      bookingEnabled: false,
+      ordersEnabled: true,
+      whatsappEnabled: true,
+    },
+  },
+  {
+    id: "support",
+    label: "Customer support",
+    agent: {
+      name: "Support Assistant",
+      role: "support",
+      greeting: "Hi! You've reached customer support. How can I help?",
+      businessInfo: "",
+      instructions:
+        "Track orders, answer questions about delivery, returns and warranty, and log complaints. Refunds and replacements need the team's approval: request them, never promise them.",
+      services: [],
+      bookingEnabled: false,
+      whatsappEnabled: true,
+      escalationKeywords: ["lawyer", "police", "consumer court", "fraud"],
+    },
+  },
+  {
     id: "blank",
     label: "Start from scratch",
     agent: {

@@ -8,6 +8,8 @@ import { startScheduler } from "./scheduler.js";
 import { attachRealtime } from "./realtime.js";
 import { apiRouter } from "./routes/api.js";
 import { twilioRouter } from "./routes/twilio.js";
+import { handleIncoming } from "./channels.js";
+import { metaRouter } from "./meta.js";
 import { cachedAudio } from "./tts.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -28,6 +30,7 @@ export function createApp(db) {
   });
   app.use("/api", express.json({ limit: "200kb" }), apiRouter(db));
   app.use("/twilio", twilioRouter(db));
+  app.use("/meta", metaRouter(db, handleIncoming));
   app.get("/healthz", (req, res) => res.json({ ok: true }));
   // Premium-voice audio that Twilio fetches with <Play> (see tts.js).
   app.get("/audio/:id.mp3", (req, res) => {

@@ -8,6 +8,7 @@
 //   POST /api/v1/leads            add a lead; with call_now the AI phones them in seconds ("speed to lead")
 //   GET  /api/v1/leads            leads
 //   GET  /api/v1/appointments     bookings
+import crypto from "node:crypto";
 import express from "express";
 import { agentLanguages } from "../languages.js";
 import { placeDueCalls, queueAiCall } from "../outbound.js";
@@ -83,7 +84,7 @@ export function v1Router(db) {
     const agent = pickAgent(req);
     const lead = db.insert("leads", {
       orgId: req.org.id, agentId: agent?.id ?? null, callId: null, customerName: String(b.name).slice(0, 80), phone,
-      interest: String(b.interest || "New enquiry").slice(0, 200), notes: String(b.notes || "").slice(0, 1000), status: "new", score: null, source: String(b.source || "api").slice(0, 40),
+      interest: String(b.interest || "New enquiry").slice(0, 200), notes: String(b.notes || "").slice(0, 1000), status: "new", score: null, source: String(b.source || "api").slice(0, 40), consent: b.consent === true,
     });
     emitEvent(db, req.org.id, "lead.created", lead);
     let call = null;
@@ -99,6 +100,60 @@ export function v1Router(db) {
     }
     res.status(201).json({ lead, call });
   }));
+
+  // E-commerce: orders from the shop's website. Cash-on-delivery orders wait for
+  // the customer's confirmation (WhatsApp, then an AI call) when the automation is on.
+  r.post("/orders", (req, res) => {
+    const b = req.body ?? {};
+    const phone = normalizePhone(b.phone);
+    if (!String(b.name || "").trim() || phone.replace(/\D/g, "").length < 10) return res.status(400).json({ error: "name and phone are required." });
+    const items = Array.isArray(b.items) ? b.items.slice(0, 50).map((i) => ({ name: String(i.name || "").slice(0, 80), quantity: Math.max(1, Math.min(100, Number(i.quantity) || 1)), price: Math.max(0, Number(i.price) || 0) })).filter((i) => i.name) : [];
+    if (!items.length) return res.status(400).json({ error: "items are required: [{name, quantity, price}]." });
+    const total = items.reduce((s, i) => s + i.price * i.quantity, 0);
+    const cod = String(b.payment || "").toLowerCase() === "cod";
+    const order = db.insert("orders", {
+      orgId: req.org.id, agentId: null, callId: null, ref: String(b.reference || crypto.randomBytes(3).toString("hex")).toUpperCase().slice(0, 20),
+      customerName: String(b.name).slice(0, 80), phone, items, total, fulfilment: "delivery", address: String(b.address || "").slice(0, 300), notes: String(b.notes || "").slice(0, 300),
+      payment: cod ? "cod" : "prepaid", status: cod ? "awaiting_confirmation" : "confirmed", consent: b.consent === true, tracking: String(b.tracking || "").slice(0, 80), source: "api",
+    });
+    emitEvent(db, req.org.id, "order.placed", order);
+    res.status(201).json(order);
+  });
+  r.patch("/orders/:ref", (req, res) => {
+    const order = db.find("orders", (o) => o.orgId === req.org.id && o.ref === String(req.params.ref).toUpperCase())[0];
+    if (!order) return res.status(404).json({ error: "Order not found." });
+    const allowed = ["awaiting_confirmation", "confirmed", "preparing", "shipped", "delivered", "completed", "cancelled", "returned"];
+    const changes = {};
+    if (req.body?.status) {
+      if (!allowed.includes(req.body.status)) return res.status(400).json({ error: `status must be one of ${allowed.join(", ")}.` });
+      changes.status = req.body.status;
+    }
+    if (req.body?.tracking !== undefined) changes.tracking = String(req.body.tracking).slice(0, 80);
+    res.json(db.update("orders", order.id, changes));
+  });
+
+  r.post("/carts", (req, res) => {
+    const b = req.body ?? {};
+    const phone = normalizePhone(b.phone);
+    if (phone.replace(/\D/g, "").length < 10) return res.status(400).json({ error: "phone is required." });
+    const items = Array.isArray(b.items) ? b.items.slice(0, 50).map((i) => ({ name: String(i.name || "").slice(0, 80), quantity: Math.max(1, Number(i.quantity) || 1), price: Math.max(0, Number(i.price) || 0) })).filter((i) => i.name) : [];
+    if (!items.length) return res.status(400).json({ error: "items are required." });
+    let checkoutUrl = "";
+    try {
+      const u = new URL(String(b.checkout_url || ""));
+      if (u.protocol === "https:") checkoutUrl = u.href;
+    } catch {}
+    const cart = db.insert("carts", {
+      orgId: req.org.id, customerName: String(b.name || "").slice(0, 80), phone, items, total: items.reduce((s, i) => s + i.price * i.quantity, 0),
+      checkoutUrl, consent: b.consent === true, status: "abandoned",
+    });
+    res.status(201).json(cart);
+  });
+  r.post("/carts/:id/recovered", (req, res) => {
+    const cart = db.get("carts", req.params.id);
+    if (!cart || cart.orgId !== req.org.id) return res.status(404).json({ error: "Cart not found." });
+    res.json(db.update("carts", cart.id, { status: "recovered", recoveredAt: new Date().toISOString() }));
+  });
 
   r.use((req, res) => res.status(404).json({ error: "Unknown API endpoint." }));
   return r;

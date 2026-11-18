@@ -36,6 +36,7 @@ export function customerContext(db, customer) {
     customer.name ? `Their name is ${customer.name}. Greet them by name naturally.` : "",
     past.length ? `Their bookings: ${past.join("; ")}.` : "",
     customer.notes ? `Notes about them: ${customer.notes}` : "",
+    recentConversations(db, customer),
   ];
   return lines.filter(Boolean).join("\n");
 }
@@ -61,4 +62,13 @@ export function eraseCustomer(db, customer) {
   }
   db.remove("customers", customer.id);
   return counts;
+}
+
+/** What this customer discussed recently on any channel (phone, WhatsApp, Instagram, Messenger, website). */
+function recentConversations(db, customer) {
+  const past = db
+    .find("calls", (c) => c.orgId === customer.orgId && c.analysis?.summary && (c.customerId === customer.id || (customer.phone && samePhone(c.callerNumber, customer.phone))))
+    .slice(-3)
+    .map((c) => `${c.createdAt.slice(0, 10)} (${c.channel}): ${c.analysis.summary}`);
+  return past.length ? `Recent conversations: ${past.join(" | ")}` : "";
 }

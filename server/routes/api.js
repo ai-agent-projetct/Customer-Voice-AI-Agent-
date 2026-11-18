@@ -7,6 +7,7 @@ import { agentsRouter } from "./agents.js";
 import { developerRouter } from "./developer.js";
 import { growthRouter } from "./growth.js";
 import { v1Router } from "./v1.js";
+import { workspaceRouter } from "./workspace.js";
 import { publicRouter } from "./public.js";
 import { recordsRouter } from "./records.js";
 
@@ -21,6 +22,7 @@ export function apiRouter(db) {
   r.use(accountRouter(db, auth));
   r.use(recordsRouter(db, auth));
   r.use(growthRouter(db, auth));
+  r.use(workspaceRouter(db, auth));
   r.use((req, res) => res.status(404).json({ error: "Not found." }));
   return r;
 }

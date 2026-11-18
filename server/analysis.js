@@ -43,7 +43,7 @@ export async function analyzeCall(db, call) {
   let analysis;
   if (aiEnabled()) {
     try {
-      const transcript = call.transcript.map((t) => `${t.role === "agent" ? "Receptionist" : "Caller"}: ${t.text}`).join("\n");
+      const transcript = call.transcript.map((t) => `${t.role === "agent" ? "AI assistant" : t.role === "human" ? "Team member" : "Customer"}: ${t.text}`).join("\n");
       const a = await structured({
         system: "You review phone calls handled by an AI receptionist for a small business and produce a short, factual report for the owner.",
         prompt: `Bookings made on this call: ${outcomes.booked}. Leads saved: ${outcomes.leads}.\n${fields.length ? `Custom fields to extract: ${fields.map((f) => `${f.name} (${f.description || "as stated by the caller"})`).join("; ")}.\n` : ""}${agent?.businessInfo ? `\n<business_information>\n${agent.businessInfo}\n</business_information>\n` : ""}\n<transcript>\n${transcript}\n</transcript>`,

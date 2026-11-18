@@ -15,7 +15,9 @@ import { escapeXml, sayXml, speakXml } from "../tts.js";
 import { notifyOwner } from "../messaging.js";
 import { canTakeCalls } from "../plans.js";
 import { realtimeAvailable, relayXml } from "../realtime.js";
-import { normalizePhone } from "../util.js";
+import { normalizePhone, samePhone } from "../util.js";
+import { askBrain } from "../brain.js";
+import { handleIncoming } from "../channels.js";
 import { wrap } from "./helpers.js";
 
 const MAX_SILENCES = 2;
@@ -164,16 +166,13 @@ export function twilioRouter(db) {
     const message = (body) => res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response>${body ? `<Message>${escapeXml(body)}</Message>` : ""}</Response>`);
     if (!agent || !from || !text) return message("");
     const org = db.get("orgs", agent.orgId);
-    if (!org || !canTakeCalls(db, org)) return message("Sorry, we can't reply here right now. Please call us.");
-    const dayAgo = new Date(Date.now() - 24 * 3600e3).toISOString();
-    let call = db.find("calls", (c) => c.agentId === agent.id && c.channel === "whatsapp" && c.status === "live" && c.callerNumber === from && c.createdAt > dayAgo).at(-1);
-    if (!call) {
-      call = startCall(db, agent, { channel: "whatsapp", callerNumber: from, greeting: phrase(agent.language, "chat", { org: org.name }) });
+    // The owner messaging their own business number is asking the Company Brain, not chatting as a customer.
+    if (org?.ownerPhone && samePhone(org.ownerPhone, from)) {
+      const { answer, sources } = await askBrain(db, org.id, text);
+      return message(`${answer}${sources.length ? `\n\nSources: ${sources.slice(0, 3).map((s) => s.title).join("; ")}` : ""}`.slice(0, 1500));
     }
-    const { reply, action } = await respond(db, agent, call, text);
-    if (action) endCall(db, call, action.type === "transfer" ? "transferred" : "completed");
-    const human = action?.type === "transfer" && (action.number || agent.transferNumber || org.ownerPhone);
-    message(human ? `${reply}\n${human}` : reply);
+    const { reply } = await handleIncoming(db, { agent, channel: "whatsapp", from, text, name: req.body.ProfileName || "" });
+    message(reply || "");
   }));
 
   // Set as the number's "Call status changes" webhook (campaign calls set it

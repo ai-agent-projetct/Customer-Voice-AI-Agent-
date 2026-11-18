@@ -2,7 +2,7 @@
 // No login: each chat gets a random secret, and everything is rate-limited.
 import crypto from "node:crypto";
 import express from "express";
-import { respond } from "../agent.js";
+import { handleIncoming } from "../channels.js";
 import { endCall, startCall } from "../calls.js";
 import { agentLanguages, lang, phrase } from "../languages.js";
 import { canTakeCalls } from "../plans.js";
@@ -70,10 +70,23 @@ export function publicRouter(db) {
     if (!text) return res.status(400).json({ error: "Say something first." });
     const agent = db.get("agents", call.agentId);
     if (!agent) return res.status(404).json({ error: "This assistant is not available." });
-    const { reply, action, language } = await respond(db, agent, call, text);
-    if (action) endCall(db, call, action.type === "transfer" ? "transferred" : "completed");
-    res.json({ reply, language, ended: Boolean(action), transfer: action?.type === "transfer" ? agent.transferNumber || "" : undefined });
+    const { reply, call: updated } = await handleIncoming(db, { agent, channel: "widget", from: call.id, text, call });
+    const fresh = db.get("calls", (updated ?? call).id);
+    const action = fresh.status === "ended" ? { type: "hangup" } : null;
+    res.json({ reply, language: fresh.language, human: Boolean(fresh.humanMode), count: fresh.transcript.length, ended: Boolean(action), transfer: action?.type === "transfer" ? agent.transferNumber || "" : undefined });
   }));
+
+  // The website chat polls this while a person from the team is replying.
+  r.post("/sessions/:id/messages", (req, res) => {
+    const call = session(req, res);
+    if (!call) return;
+    const after = Math.max(0, Number(req.body?.after) || 0);
+    res.json({
+      human: Boolean(call.humanMode),
+      count: call.transcript.length,
+      messages: call.transcript.slice(after).filter((t) => t.role !== "caller").map((t) => ({ role: t.role === "human" ? "human" : "agent", text: t.text, by: t.role === "human" ? t.by || "Team" : null })),
+    });
+  });
 
   r.post("/sessions/:id/end", (req, res) => {
     const call = session(req, res);

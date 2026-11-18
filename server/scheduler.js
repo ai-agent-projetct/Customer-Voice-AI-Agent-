@@ -9,6 +9,7 @@ import { dailyBrief } from "./insights.js";
 import { queueMessage } from "./messaging.js";
 import { placeDueCalls } from "./outbound.js";
 import { retryDeliveries } from "./webhooks.js";
+import { runAutomations } from "./automations.js";
 import { localParts, minutesBetween } from "./util.js";
 
 const STALE_MINUTES = 45;
@@ -21,6 +22,7 @@ export async function tick(db, now = new Date()) {
   sendBriefs(db, now);
   closeStaleCalls(db, now);
   await dialCampaigns(db, now);
+  await runAutomations(db, now); // may queue calls: placed just below in the same pass
   await placeDueCalls(db, now);
   await retryDeliveries(db, now);
 }

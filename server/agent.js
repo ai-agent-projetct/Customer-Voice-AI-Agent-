@@ -4,8 +4,10 @@ import { normalizeServices } from "./catalog.js";
 import { customerContext } from "./customers.js";
 import { agentLanguages, detectLanguage, greetingIn, lang as langOf, phrase } from "./languages.js";
 import { Anthropic, EFFORT, MODEL, aiEnabled, createMessage } from "./llm.js";
-import { freeSlots, runTool, switchLanguage, toolDefinitions } from "./tools.js";
-import { addDays, toMinutes, todayIn } from "./util.js";
+import { searchBrain } from "./brain.js";
+import { notifyOwner } from "./messaging.js";
+import { ROLES, freeSlots, runTool, switchLanguage, toolDefinitions } from "./tools.js";
+import { addDays, samePhone, toMinutes, todayIn } from "./util.js";
 
 export { aiEnabled };
 
@@ -53,6 +55,12 @@ export function buildSystemPrompt(db, agent, call) {
       ? `\nPurpose of this call: ${campaign.goal}\nIf they are not interested, thank them and end the call. If they ask not to be called again, use do_not_call.`
       : "",
     call.goal ? `\nPurpose of this call: ${call.goal}` : "",
+    ROLES[agent.role] ? `Your job (${ROLES[agent.role].label}): ${ROLES[agent.role].job}` : "",
+    ["whatsapp", "instagram", "messenger", "widget"].includes(call.channel)
+      ? `This is a text chat on ${call.channel === "widget" ? "the website" : call.channel}, not a phone call: short friendly messages are fine, and you may use line breaks.`
+      : "",
+    call.handoff ? `\n<handoff>\nYour colleague ${call.handoff.from} passed this conversation to you: ${call.handoff.summary}\nConversation so far:\n${call.handoff.transcript}\n</handoff>\nContinue naturally; don't greet again.` : "",
+    pendingOrders(db, agent, call),
     (agent.departments || []).length ? `Teams you can transfer to: ${agent.departments.map((d) => d.name).join(", ")}.` : "",
     agent.ordersEnabled ? "You can take orders for the items in the services and prices list: read the order and total back before placing it." : "",
     customer ? `\n<caller_profile>\n${customerContext(db, customer)}\n</caller_profile>` : "",
@@ -94,11 +102,20 @@ export async function respond(db, agent, call, userText, { onText } = {}) {
   if (detected) switchLanguage(db, agent, call, detected, "detected");
   // onText (real-time calls) receives the reply piece by piece as Claude writes it.
   const stream = onText && ((delta) => onText(delta.replace(/[*_#`>]/g, "")));
+  // Escalation rules: words the owner listed (e.g. "lawyer", "police") always reach a person.
+  const keyword = (agent.escalationKeywords || []).find((k) => k && userText.toLowerCase().includes(k.toLowerCase()));
+  if (keyword && !call.escalated) {
+    call.escalated = true;
+    notifyOwner(db, agent.orgId, { kind: "escalation", title: `Escalation: customer said "${keyword}"`, body: `${userText.slice(0, 200)}${call.callerNumber ? `\nFrom ${call.callerNumber}` : ""}`, callId: call.id, urgent: true });
+  }
   const outcome = aiEnabled() ? await claudeTurn(db, agent, call, userText, stream) : demoTurn(db, agent, call, userText);
+  // The reply is still spoken; then the conversation goes to a person (phone transfer or chat takeover).
+  if (keyword && !outcome.action) outcome.action = { type: "transfer", reason: `Escalation keyword: ${keyword}` };
   outcome.streamed = Boolean(stream && aiEnabled() && outcome.streamed);
   const reply = speakable(outcome.reply) || "Sorry, could you say that again?";
   call.transcript.push({ role: "agent", text: reply, at: new Date().toISOString() });
-  if (outcome.action?.summary) call.summary = outcome.action.summary;
+  if (outcome.action?.summary && outcome.action.type !== "handoff") call.summary = outcome.action.summary;
+  if (outcome.action?.type === "handoff") handOff(db, agent, call, outcome.action);
   db.update("calls", call.id, {
     transcript: call.transcript,
     messages: call.messages,
@@ -106,6 +123,11 @@ export async function respond(db, agent, call, userText, { onText } = {}) {
     verifiedRefs: call.verifiedRefs,
     system: call.system,
     promptLanguage: call.promptLanguage,
+    escalated: call.escalated,
+    agentId: call.agentId,
+    agentName: call.agentName,
+    handoff: call.handoff,
+    handoffs: call.handoffs,
   });
   return { reply, action: outcome.action ?? null, language: call.language ?? agent.language, streamed: outcome.streamed };
 }
@@ -134,7 +156,7 @@ async function claudeTurn(db, agent, call, userText, onText) {
   }
   const system = call.system;
   const org = db.get("orgs", agent.orgId);
-  const tools = toolDefinitions(agent, org, call);
+  const tools = toolDefinitions(agent, org, call, db);
   const spoken = [];
   let action = null;
 
@@ -180,6 +202,38 @@ async function claudeTurn(db, agent, call, userText, onText) {
   return { reply: spoken.join(" "), action, streamed: spoken.length > 0 };
 }
 
+/**
+ * Agentic hand-off: the conversation moves to a colleague AI employee. The
+ * colleague starts a fresh AI history (so earlier reasoning is never edited)
+ * and gets a briefing with the conversation so far.
+ */
+function handOff(db, from, call, action) {
+  const to = db.get("agents", action.agentId);
+  if (!to) return;
+  const transcript = call.transcript.slice(-12).map((t) => `${t.role === "agent" ? "Assistant" : "Customer"}: ${t.text}`).join("\n");
+  call.handoffs = [...(call.handoffs || []), { from: from.name, to: to.name, summary: action.summary, at: new Date().toISOString() }];
+  call.handoff = { from: from.name, summary: action.summary, transcript };
+  call.agentId = to.id;
+  call.agentName = to.name;
+  call.messages = [];
+  call.system = null;
+  call.promptLanguage = null;
+  notifyActivity(db, from, call, to, action.summary);
+}
+
+function notifyActivity(db, from, call, to, summary) {
+  db.insert("activity", { orgId: from.orgId, agentId: from.id, agentName: from.name, callId: call.id, channel: call.channel, tool: "hand_off", input: JSON.stringify({ to: to.name }), result: summary || "" });
+}
+
+/** Cash-on-delivery orders waiting for this customer's confirmation. */
+function pendingOrders(db, agent, call) {
+  const phone = call.callerNumber;
+  if (!phone) return "";
+  const orders = db.find("orders", (o) => o.orgId === agent.orgId && o.status === "awaiting_confirmation" && samePhone(o.phone, phone));
+  if (!orders.length) return "";
+  return `\nOrders waiting for this customer's confirmation (cash on delivery): ${orders.map((o) => `${o.ref}: ${o.items.map((i) => `${i.quantity} × ${i.name}`).join(", ")}, ₹${o.total}${o.address ? `, to ${o.address}` : ""}`).join("; ")}. Confirm or cancel with confirm_order.`;
+}
+
 // Models that accept {role: "system"} entries inside `messages`.
 function supportsMidConversationSystem(model) {
   return /opus-5|opus-4-8|fable|mythos|sonnet-5-5/.test(model);
@@ -197,7 +251,7 @@ function detectedNow(call) {
 function demoTurn(db, agent, call, userText) {
   const text = userText.toLowerCase();
   const org = db.get("orgs", agent.orgId);
-  const has = (name) => toolDefinitions(agent, org, call).some((t) => t.name === name);
+  const has = (name) => toolDefinitions(agent, org, call, db).some((t) => t.name === name);
   const current = call.language ?? agent.language;
   if (detectedNow(call)) {
     return { reply: `${phrase(current, "chosen")} ${greetingIn(agent, current, org?.name)}` };
@@ -223,6 +277,30 @@ function demoTurn(db, agent, call, userText) {
   }
   const booking = demoBooking(db, agent, call, userText, text);
   if (booking) return booking;
+  // Cash-on-delivery confirmation ("yes" / "cancel") for an order waiting on this customer.
+  const waiting = call.callerNumber && db.find("orders", (o) => o.orgId === agent.orgId && o.status === "awaiting_confirmation" && samePhone(o.phone, call.callerNumber)).at(-1);
+  if (waiting && has("confirm_order")) {
+    if (/\b(yes|confirm|ok|haan|sure)\b|हाँ|சரி/.test(text)) {
+      runTool(db, agent, call, "confirm_order", { reference: waiting.ref, decision: "confirm", note: "" });
+      return { reply: `Thank you! Your order ${waiting.ref} for ₹${waiting.total.toLocaleString("en-IN")} is confirmed and will be dispatched soon.` };
+    }
+    if (/\b(no|cancel|nahi)\b|नहीं|வேண்டாம்/.test(text)) {
+      runTool(db, agent, call, "confirm_order", { reference: waiting.ref, decision: "cancel", note: userText });
+      return { reply: `Okay, I've cancelled order ${waiting.ref}. Sorry to see it go!` };
+    }
+  }
+  if (/where is my order|track|order status|delivery status/.test(text) && has("track_order")) {
+    const ref = (userText.match(/\b[A-Z0-9]{6}\b/) || [""])[0];
+    return { reply: runTool(db, agent, call, "track_order", { reference: ref, phone: call.callerNumber || "" }).result.replace(/^No order found.*$/, "I couldn't find an order for this number. Could you share the order reference?") };
+  }
+  if (/refund|replace|damaged|broken|wrong item/.test(text) && has("request_refund")) {
+    const out = runTool(db, agent, call, "request_refund", { reference: "", amount: 0, reason: userText });
+    if (!out.result.startsWith("No order")) return { reply: "I'm sorry about that. I've sent a refund request to our team for approval, and they'll get back to you shortly." };
+  }
+  const colleague = has("hand_off") && db.find("agents", (a) => a.orgId === agent.orgId && a.active && a.id !== agent.id && text.includes(a.name.toLowerCase().split(" ")[0]))[0];
+  if (colleague) {
+    return { reply: `Sure, ${colleague.name} will help you from here.`, action: { type: "handoff", agentId: colleague.id, summary: userText } };
+  }
   const faq = (agent.faqs || []).find((f) => sharesKeyword(f.q, text));
   if (faq) return { reply: faq.a };
   const services = normalizeServices(agent.services);
@@ -235,6 +313,11 @@ function demoTurn(db, agent, call, userText) {
   if (/timing|open|close|hours|what time|समय|टाइम|நேரம்|திறந்த/.test(text)) {
     const h = agent.hours;
     return { reply: `We're open ${dayRange(h.days)}, from ${spokenTime(h.open)} to ${spokenTime(h.close)}. Would you like to book a visit?` };
+  }
+  if (has("search_knowledge")) {
+    const [hit] = searchBrain(db, agent.orgId, userText, { limit: 1 });
+    // Demo mode answers from the vault only on a clear match (most of the question's words found).
+    if (hit && hit.matched >= 2 && hit.coverage >= 0.5) return { reply: hit.text.length > 300 ? `${hit.text.slice(0, 300)}…` : hit.text };
   }
   if (text.includes("?")) {
     runTool(db, agent, call, "note_unanswered_question", { question: userText });

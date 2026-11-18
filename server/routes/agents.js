@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import express from "express";
 import { DEFAULT_HOURS, TEMPLATES, normalizeServices } from "../catalog.js";
 import { RATES, isLanguage } from "../languages.js";
+import { PERMISSIONS, ROLES } from "../tools.js";
 import { startCall } from "../calls.js";
 import { planOf } from "../plans.js";
 import { autofill, translateGreetings } from "../setup-assistant.js";
@@ -15,6 +16,7 @@ const AGENT_FIELDS = [
   "bookingEnabled", "transferNumber", "phoneNumber", "hours", "timeZone", "active", "widgetEnabled",
   "languages", "languageMenu", "voiceGender", "speakingRate", "greetings", "voices", "voiceEngine",
   "voiceMode", "recordCalls", "departments", "extractFields", "ordersEnabled", "whatsappEnabled", "whatsappNumber",
+  "role", "permissions", "escalationKeywords", "instagramId", "messengerPageId",
 ];
 
 export function agentsRouter(db, auth) {
@@ -39,6 +41,11 @@ export function agentsRouter(db, auth) {
       voiceGender: "female",
       speakingRate: "normal",
       voiceEngine: "standard",
+      role: "receptionist",
+      permissions: {},
+      escalationKeywords: [],
+      instagramId: "",
+      messengerPageId: "",
       voiceMode: "standard", // "realtime" = streaming replies with barge-in (ConversationRelay)
       recordCalls: false,
       departments: [],
@@ -164,6 +171,19 @@ function validateAgent(c) {
       if (value.length > 600) return "Greetings must be under 600 characters.";
     }
     c[key] = Object.fromEntries(Object.entries(map).filter(([, v]) => v.trim()).map(([k, v]) => [k, v.trim()]));
+  }
+  if ("role" in c && !(c.role in ROLES)) return "Unknown role.";
+  if ("permissions" in c) {
+    if (!c.permissions || typeof c.permissions !== "object" || Array.isArray(c.permissions)) return "Permissions must be an object.";
+    if (!Object.entries(c.permissions).every(([k, v]) => k in PERMISSIONS && typeof v === "boolean")) return "Unknown permission.";
+  }
+  if ("escalationKeywords" in c) {
+    if (!Array.isArray(c.escalationKeywords) || c.escalationKeywords.length > 30 || !c.escalationKeywords.every((k) => typeof k === "string")) return "Escalation words must be a list.";
+    c.escalationKeywords = [...new Set(c.escalationKeywords.map((k) => k.trim().toLowerCase()).filter(Boolean))].map((k) => k.slice(0, 40));
+  }
+  for (const key of ["instagramId", "messengerPageId"]) {
+    if (key in c && (typeof c[key] !== "string" || !/^\d{0,30}$/.test(c[key].trim()))) return "Instagram and Messenger IDs are numbers (from Meta Business Suite).";
+    if (key in c) c[key] = c[key].trim();
   }
   if ("voiceMode" in c && !["standard", "realtime"].includes(c.voiceMode)) return "Voice mode must be standard or realtime.";
   if ("whatsappNumber" in c) {
