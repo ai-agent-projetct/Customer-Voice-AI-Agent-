@@ -9,7 +9,7 @@ import { startCall } from "./calls.js";
 import { findCustomer, upsertCustomer } from "./customers.js";
 import { agentLanguages, phrase } from "./languages.js";
 import { usage } from "./plans.js";
-import { dialer, publicUrl } from "./telephony.js";
+import { placeCall } from "./voice/router.js";
 import { localParts, minutesBetween, normalizePhone } from "./util.js";
 
 const MAX_ATTEMPTS = 3;
@@ -63,9 +63,8 @@ export async function placeDueCalls(db, now = new Date()) {
       callbackId: row.id, goal: row.goal || `You are calling back about: ${row.reason}. Help them with it.`,
       greeting: `${phrase(language, "aiCall", { name: first ? ` ${first}` : "", org: org.name })} ${row.opening || ""}`.trim(),
     });
-    const placed = await dialer.call({ to: row.phone, url: publicUrl(`/twilio/outbound/${call.id}`), statusCallback: publicUrl("/twilio/status") });
+    const placed = await placeCall(db, { call, to: row.phone });
     if (placed.ok) {
-      db.update("calls", call.id, { twilioSid: placed.sid });
       db.update("callbacks", row.id, { status: "calling", callId: call.id, attempts: (row.attempts || 0) + 1 });
     } else {
       db.remove("calls", call.id);
@@ -95,11 +94,10 @@ export async function bridgeCall(db, org, { to, customerName }) {
     callerNumber: normalizePhone(to), customerName, customerId: findCustomer(db, org.id, to)?.id ?? null,
     transcript: [], messages: [], summary: "Click-to-call by the owner", durationSec: 0,
   });
-  const placed = await dialer.call({ to: org.ownerPhone, url: publicUrl(`/twilio/bridge/${call.id}`), statusCallback: publicUrl("/twilio/status") });
+  const placed = await placeCall(db, { call, to: org.ownerPhone, kind: "bridge" });
   if (!placed.ok) {
     db.remove("calls", call.id);
     return placed;
   }
-  db.update("calls", call.id, { twilioSid: placed.sid });
   return { ok: true, callId: call.id };
 }

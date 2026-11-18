@@ -12,6 +12,7 @@ import { respond } from "./agent.js";
 import { endCall } from "./calls.js";
 import { agentLanguages, lang, phrase, voiceFor } from "./languages.js";
 import { escapeXml } from "./tts.js";
+import { handleStreamUpgrade } from "./voice/router.js";
 
 export function realtimeAvailable() {
   return Boolean(process.env.PUBLIC_URL);
@@ -45,6 +46,8 @@ export function relayXml(db, agent, call, greeting) {
 export function attachRealtime(server, db) {
   const wss = new WebSocketServer({ noServer: true });
   server.on("upgrade", (req, socket, head) => {
+    // VoiceDesk's own voice pipeline (Twilio, Plivo, Vobiz, Exotel, browser).
+    if (handleStreamUpgrade(db, req, socket, head)) return;
     const match = /^\/realtime\/([\w-]+)\/([\w-]+)$/.exec(new URL(req.url, "http://x").pathname);
     const call = match && db.get("calls", match[1]);
     const ok = call && call.relayToken && call.status !== "ended" && safeEqual(call.relayToken, match[2]);

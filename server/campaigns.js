@@ -8,7 +8,7 @@ import { startCall } from "./calls.js";
 import { findCustomer } from "./customers.js";
 import { agentLanguages, phrase } from "./languages.js";
 import { planOf, usage } from "./plans.js";
-import { dialer, publicUrl } from "./telephony.js";
+import { placeCall } from "./voice/router.js";
 import { localParts, normalizePhone } from "./util.js";
 
 export const MAX_CONTACTS = 2000;
@@ -88,14 +88,8 @@ export async function dialCampaigns(db, now = new Date()) {
       contact.callId = call.id;
       contact.attempts = (contact.attempts || 0) + 1;
       slots--;
-      const placed = await dialer.call({
-        to: contact.phone,
-        url: publicUrl(`/twilio/outbound/${call.id}`),
-        statusCallback: publicUrl("/twilio/status"),
-      });
-      if (placed.ok) {
-        db.update("calls", call.id, { twilioSid: placed.sid });
-      } else {
+      const placed = await placeCall(db, { call, to: contact.phone });
+      if (!placed.ok) {
         contact.status = "pending"; // try again once calling works
         contact.callId = null;
         contact.attempts -= 1;

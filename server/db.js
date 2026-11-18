@@ -28,6 +28,7 @@ const EMPTY = () => ({
   activity: [],
   approvals: [],
   carts: [],
+  numbers: [],
 });
 
 export class Store {
