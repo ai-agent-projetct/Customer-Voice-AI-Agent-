@@ -286,3 +286,13 @@ main, .grid-2 > *, .editor > * { min-width: 0; }
 #call-box { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
 details summary { cursor: pointer; margin: 6px 0 10px; }
 .network-card { background: var(--brand-tint); margin-bottom: 4px; }
+
+/* v7: Voice API */
+.code-input { width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; line-height: 1.45; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: #fbfaf6; resize: vertical; }
+.number-row { display: grid; grid-template-columns: 1.1fr 1.4fr 1.4fr auto auto; gap: 12px; align-items: end; padding: 12px 0; border-top: 1px solid var(--line); }
+.number-row:first-of-type { border-top: 0; }
+.number-row label { margin: 0; }
+@media (max-width: 900px) { .number-row { grid-template-columns: 1fr; } }
+.ok-text { color: var(--brand); font-weight: 700; }
+.bad-text { color: #b42318; font-weight: 600; }
+.stat b.small-num { font-size: 18px; }

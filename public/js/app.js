@@ -8,6 +8,7 @@ import "./pages/manage.js";
 import "./pages/platform.js";
 import "./pages/workforce.js";
 import "./pages/voice.js";
+import "./pages/voiceapi.js";
 
 window.addEventListener("hashchange", router);
 router();

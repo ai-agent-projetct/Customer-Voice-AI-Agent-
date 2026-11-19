@@ -74,7 +74,7 @@ To see the admin console, put your email in `ADMIN_EMAILS`.
 npm test
 ```
 
-There are 80 end-to-end tests, all running without any paid account. They cover accounts and
+There are 81 end-to-end tests, all running without any paid account. They cover accounts and
 data isolation, phone webhooks and signature checks, booking rules, the Claude tool loop and
 structured analysis (against a fake API), caller memory, self-service privacy, the teaching
 loop, alerts, ROI, briefs, reminders, live takeover, plan limits, campaign compliance, the

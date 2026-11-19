@@ -11,6 +11,7 @@ import { workspaceRouter } from "./workspace.js";
 import { publicRouter } from "./public.js";
 import { recordsRouter } from "./records.js";
 import { voiceRouter } from "./voice.js";
+import { voicePlatformRouter } from "./voice-platform.js";
 
 export function apiRouter(db) {
   const r = express.Router();
@@ -25,6 +26,7 @@ export function apiRouter(db) {
   r.use(growthRouter(db, auth));
   r.use(workspaceRouter(db, auth));
   r.use(voiceRouter(db, auth));
+  r.use(voicePlatformRouter(db, auth));
   r.use((req, res) => res.status(404).json({ error: "Not found." }));
   return r;
 }

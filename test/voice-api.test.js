@@ -197,3 +197,35 @@ test("API checks: bad flows, numbers that aren't yours, other businesses' calls,
   const bad = await fetch(`${base}/api/v1/voice/numbers`, { headers: { authorization: "Bearer vd_live_nope" } });
   assert.equal(bad.status, 401);
 });
+
+test("dashboard: check flows, point a number at your app, see calls, bill and recordings", async () => {
+  const login = await (await fetch(`${base}/api/auth/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: "api@x.in", password: "password123" }) })).json();
+  const dash = async (method, p, body) => {
+    const res = await fetch(`${base}/api${p}`, { method, headers: { "content-type": "application/json", authorization: `Bearer ${login.token}` }, body: body && JSON.stringify(body) });
+    return { status: res.status, body: (res.headers.get("content-type") || "").includes("json") ? await res.json() : Buffer.from(await res.arrayBuffer()) };
+  };
+  assert.deepEqual((await dash("POST", "/voice-platform/validate", { flow: [{ say: "hi" }] })).body, { ok: true, problem: null });
+  assert.equal((await dash("POST", "/voice-platform/validate", { flow: [{ jump: 1 }] })).body.ok, false);
+  assert.equal((await dash("PATCH", `/voice-platform/numbers/${number.id}`, { voiceUrl: "http://10.0.0.1/x" })).status, 400, "private network addresses are always refused");
+  assert.equal((await dash("PATCH", `/voice-platform/numbers/${number.id}`, { voiceUrl: `${appBase}/answer` })).status, 200, "localhost only because this test enables it");
+  process.env.VOICE_ALLOW_LOCAL_URLS = "0";
+  assert.equal((await dash("PATCH", `/voice-platform/numbers/${number.id}`, { voiceUrl: `${appBase}/answer` })).status, 400);
+  process.env.VOICE_ALLOW_LOCAL_URLS = "1";
+  await dash("PATCH", `/voice-platform/numbers/${number.id}`, { voiceUrl: "", record: true });
+  const view = (await dash("GET", "/voice-platform")).body;
+  assert.equal(view.numbers[0].voiceUrl, "");
+  assert.equal(view.numbers[0].record, true);
+  assert.ok(view.usage.outboundMinutes >= 1);
+  assert.ok(view.calls.some((c) => c.handled_by === "flow" && c.events.some((e) => e.step === "dial")));
+  assert.ok(view.recordings.length >= 2);
+  const wav = await dash("GET", `/voice-platform/recordings/${view.recordings[0].id}`);
+  assert.equal(wav.status, 200);
+  // Test calls ring the owner's own phone.
+  const before = phone.answered.length;
+  const call = await dash("POST", "/voice-platform/test-flow", { flow: [{ say: "Testing" }, { hangup: true }] });
+  assert.equal(call.status, 201, JSON.stringify(call.body));
+  const leg = await until(() => phone.answered.length > before && phone.answered.at(-1));
+  assert.equal(leg.toUser, "+919845000001");
+  await until(() => db.get("calls", call.body.id).status === "ended");
+  await dash("PATCH", `/voice-platform/numbers/${number.id}`, { record: false });
+});
